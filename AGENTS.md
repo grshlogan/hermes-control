@@ -121,6 +121,30 @@ cargo test -p hermes-control-bot --test bot_boundary
 If logic changed, tests should cover the behavior. For new mutating operations,
 write tests before implementation when feasible.
 
+## Phase Advancement Policy
+
+Every Phase advancement must include a self-verification loop before it is
+reported as complete or suggested for commit:
+
+- Confirm the change belongs to the current phase in
+  `plan_rust_control_rewrite.md`.
+- Write or update tests for new behavior before implementation when code
+  behavior changes.
+- Run `cargo fmt --all -- --check`.
+- Run `cargo test --workspace`.
+- Run `cargo build --workspace`.
+- Run `cargo clippy --workspace --all-targets -- -D warnings`.
+- Run `git diff --check`.
+- Update handoff/change docs, especially `docs/AI_HANDOFF.md` and
+  `docs/RECENT_CHANGES.md`.
+
+Docs-only Phase planning changes may skip Rust build/test checks only when no
+Rust code, config schema, or generated lockfile changed; still run
+`git diff --check` and update the change log.
+
+Do not claim a Phase is complete if verification was skipped, failed, or only
+partially run. Report skipped checks and remaining risks explicitly.
+
 ## Bot Boundary
 
 `hermes-control-bot` is a Windows-hosted Telegram process. It must remain a thin

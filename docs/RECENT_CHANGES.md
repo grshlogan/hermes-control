@@ -100,3 +100,20 @@ unimplemented ideas here.
 - Added daemon Phase 3 tests covering auth, database initialization, providers,
   active route, and model routes.
 - Mutating operation execution remains intentionally unimplemented.
+
+## 2026-05-02: Phase advancement verification and Phase 4 typed ops started
+
+- Added Phase advancement self-verification rules to `AGENTS.md`.
+- Added `WslController` and `HermesRuntimeController` planning APIs in
+  `hermes-control-core`.
+- WSL restart/shutdown plans now produce fixed `wsl.exe` command previews and
+  require confirmation.
+- Hermes destructive plans now require confirmation and intentionally expose no
+  raw shell command.
+- Added daemon `/v1/wsl/action` and `/v1/hermes/action` routes.
+- Dry-run action requests return typed operation previews.
+- Non-dry-run destructive requests create confirmation records and append audit
+  preview events.
+- Added Phase 4 tests for core operation plans and daemon action routes.
+- Real WSL/Hermes process execution remains intentionally unimplemented until an
+  executor abstraction, operation lock, and confirmation lifecycle are tested.

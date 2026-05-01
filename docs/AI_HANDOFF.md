@@ -1,8 +1,9 @@
 # AI Handoff
 
-Hermes Control is now a Rust workspace with Phase 1 and Phase 2 complete; Phase
-3 has started by giving the daemon authenticated read-only API routes and
-SQLite state/audit foundations.
+Hermes Control is now a Rust workspace with Phase 1 and Phase 2 complete. Phase
+3 has authenticated read-only daemon API and SQLite state/audit foundations;
+Phase 4 has started with typed WSL/Hermes operation planning, dry-run previews,
+and destructive-action confirmation records.
 
 ## Phase Report
 
@@ -33,7 +34,20 @@ Phase 3 has started:
 - Build-time daemon initialization creates SQLite state and audit databases.
 - Initial state tables cover active route, operation state, and confirmations.
 - Initial audit table covers append-only audit event summaries.
-- Mutating operation execution is still not implemented.
+
+Phase 4 has started:
+
+- `hermes-control-core` exposes `WslController` and `HermesRuntimeController`
+  plan builders.
+- WSL restart/shutdown plans produce fixed `wsl.exe` command previews and
+  require confirmation.
+- Hermes destructive actions produce confirmation-required operation plans
+  without raw shell commands.
+- `hermes-control-daemon` accepts `/v1/wsl/action` and `/v1/hermes/action`.
+- Dry-run action requests return typed command previews.
+- Non-dry-run destructive actions create confirmation records and audit preview
+  events.
+- Real process execution is still not implemented.
 
 ## Current Runtime Observation
 
@@ -51,22 +65,23 @@ runtime claims.
 
 Latest pushed commits:
 
+- `2d49981 feat: start daemon API and SQLite state`
 - `4bc4d1d docs: add AI handoff and change log`
 - `a797a07 docs: clarify Tauri GUI adoption boundary`
 - `1049326 feat: add read-only core and CLI status`
-- `e9e957a docs: require approval before commit and push`
 
 ## Current Phase
 
-Phase 3 remaining work should stay focused on daemon API and SQLite state:
+Phase 4 remaining work should stay focused on safe execution after the typed
+planning layer:
 
-- Add operation lock, confirmation records, cancellation records, and audit
-  append flow for mutating requests.
-- Add typed daemon request/response contracts for route switching and runtime
-  actions.
-- Move CLI mutating commands to daemon API calls when those routes exist.
-- Keep mutating WSL/vLLM/Hermes operations as planned or dry-run only until
-  typed operation builders and tests exist.
+- Add operation lock enforcement around mutating requests.
+- Implement confirmation `/v1/confirm` and `/v1/cancel` lifecycle.
+- Add a command executor abstraction with tests before any real WSL/Hermes
+  process execution.
+- Keep WSL/Hermes real execution behind typed builders, audit, and confirmation.
+- Move CLI mutating commands to daemon API calls after executor behavior is
+  covered.
 
 ## Useful Commands
 
@@ -91,7 +106,6 @@ cargo run -p hermes-control-cli -- models
 
 - Keep `docs/RECENT_CHANGES.md` updated after each landed conversation-level
   change.
-- Keep Phase 3 daemon work narrow: API/state/confirmation first, no GUI-first
-  detour.
+- Keep Phase 4 narrow: typed WSL/Hermes ops first, no vLLM Phase 5 work yet.
 - Tauri belongs in Phase 8 as a GUI shell and typed daemon client only.
 - Ask for explicit approval before commit and push.

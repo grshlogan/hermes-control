@@ -3,18 +3,23 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use axum::{
     Json, Router,
     extract::{Query, State},
     http::{HeaderMap, StatusCode, header::AUTHORIZATION},
-    routing::get,
+    routing::{get, post},
 };
-use hermes_control_core::{ConfigError, collect_read_only_status, load_config_dir};
+use hermes_control_core::{
+    ConfigError, HermesRuntimeController, OperationPlan, WslController, collect_read_only_status,
+    load_config_dir,
+};
 use hermes_control_types::{
-    ActiveRouteStatus, AuditEventSummary, HealthStatus, ModelRuntimeSummary, ProviderConfig,
-    ReadOnlyStatus,
+    ActionRequest, ActiveRouteStatus, AuditEventSummary, HealthStatus, HermesAction,
+    ModelRuntimeSummary, OperationResponse, ProviderConfig, ReadOnlyStatus, Requester,
+    RequesterChannel, RiskLevel, WslAction,
 };
 use rusqlite::{Connection, OptionalExtension};
 use thiserror::Error;
@@ -77,6 +82,10 @@ pub fn build_router(
         .route("/v1/models", get(models))
         .route("/v1/route/active", get(active_route))
         .route("/v1/audit", get(audit_events))
+        .route("/v1/wsl/status", get(wsl_status))
+        .route("/v1/wsl/action", post(wsl_action))
+        .route("/v1/hermes/status", get(hermes_status))
+        .route("/v1/hermes/action", post(hermes_action))
         .with_state(state))
 }
 
@@ -154,6 +163,141 @@ async fn audit_events(
     state.store.audit_events(limit).map(Json).map_err(|err| {
         tracing::warn!(error = %err, "failed to read audit events");
         StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+async fn wsl_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<Option<hermes_control_types::WslDistroStatus>> {
+    require_auth(&state, &headers)?;
+    collect_read_only_status(&*state.config_dir)
+        .await
+        .map(|status| Json(status.wsl))
+        .map_err(|err| {
+            tracing::warn!(error = %err, "failed to collect WSL status");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+async fn hermes_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<hermes_control_types::EndpointStatus> {
+    require_auth(&state, &headers)?;
+    collect_read_only_status(&*state.config_dir)
+        .await
+        .map(|status| Json(status.hermes))
+        .map_err(|err| {
+            tracing::warn!(error = %err, "failed to collect Hermes status");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+async fn wsl_action(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ActionRequest<WslAction>>,
+) -> ApiResult<OperationResponse> {
+    require_auth(&state, &headers)?;
+    let config = load_config_dir(&*state.config_dir).map_err(|err| {
+        tracing::warn!(error = %err, "failed to load WSL action config");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let controller = WslController::with_default_user(
+        config.control.wsl.distro,
+        config.control.wsl.default_user,
+    );
+    let action = format!("wsl::{:?}", request.action);
+    let plan = controller.plan(request.action);
+    operation_response(&state, request.requester, action, request.dry_run, plan).map(Json)
+}
+
+async fn hermes_action(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ActionRequest<HermesAction>>,
+) -> ApiResult<OperationResponse> {
+    require_auth(&state, &headers)?;
+    let config = load_config_dir(&*state.config_dir).map_err(|err| {
+        tracing::warn!(error = %err, "failed to load Hermes action config");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let controller = HermesRuntimeController::new(
+        config.control.hermes.agent_root,
+        config.control.hermes.health_url,
+    );
+    let action = format!("hermes::{:?}", request.action);
+    let plan = controller.plan(request.action);
+    operation_response(&state, request.requester, action, request.dry_run, plan).map(Json)
+}
+
+fn operation_response(
+    state: &AppState,
+    requester: Requester,
+    action: String,
+    dry_run: bool,
+    plan: OperationPlan,
+) -> Result<OperationResponse, StatusCode> {
+    if dry_run {
+        return Ok(OperationResponse {
+            status: "dry_run".to_owned(),
+            risk: plan.risk,
+            summary: plan.summary,
+            dry_run: true,
+            commands: plan.commands,
+            confirmation_id: None,
+            code_hint: None,
+            expires_at: None,
+        });
+    }
+
+    if plan.requires_confirmation
+        && matches!(plan.risk, RiskLevel::Destructive | RiskLevel::Experimental)
+    {
+        let confirmation = state
+            .store
+            .create_confirmation(&requester, &action, &plan)
+            .map_err(|err| {
+                tracing::warn!(error = %err, "failed to create confirmation");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        state
+            .store
+            .append_audit_event(&requester, &action, &plan)
+            .map_err(|err| {
+                tracing::warn!(error = %err, "failed to append audit event");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+
+        return Ok(OperationResponse {
+            status: "confirmation_required".to_owned(),
+            risk: plan.risk,
+            summary: plan.summary,
+            dry_run: false,
+            commands: plan.commands,
+            confirmation_id: Some(confirmation.id),
+            code_hint: Some(confirmation.code_hint),
+            expires_at: Some(confirmation.expires_at),
+        });
+    }
+
+    state
+        .store
+        .append_audit_event(&requester, &action, &plan)
+        .map_err(|err| {
+            tracing::warn!(error = %err, "failed to append audit event");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(OperationResponse {
+        status: "planned".to_owned(),
+        risk: plan.risk,
+        summary: plan.summary,
+        dry_run: false,
+        commands: plan.commands,
+        confirmation_id: None,
+        code_hint: None,
+        expires_at: None,
     })
 }
 
@@ -289,6 +433,99 @@ impl DaemonStateStore {
         })?;
 
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn create_confirmation(
+        &self,
+        requester: &Requester,
+        action: &str,
+        plan: &OperationPlan,
+    ) -> Result<ConfirmationPreview, DaemonError> {
+        let now = unix_epoch_seconds();
+        let id = format!("confirm_{now}");
+        let code_hint = format!("HERMES-{:04}", now % 10000);
+        let expires_at = format!("unix:{}", now + 300);
+        let connection = Connection::open(&*self.state_db)?;
+        connection.execute(
+            "
+            INSERT INTO confirmations (
+                id, operation_id, requester_channel, requester_user_id, action,
+                risk_level, code_hash, expires_at, status
+            )
+            VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6, ?7, 'pending')
+            ",
+            (
+                &id,
+                requester_channel_label(&requester.channel),
+                &requester.user_id,
+                action,
+                risk_label(&plan.risk),
+                &code_hint,
+                &expires_at,
+            ),
+        )?;
+
+        Ok(ConfirmationPreview {
+            id,
+            code_hint,
+            expires_at,
+        })
+    }
+
+    fn append_audit_event(
+        &self,
+        requester: &Requester,
+        action: &str,
+        plan: &OperationPlan,
+    ) -> Result<(), DaemonError> {
+        let connection = Connection::open(&*self.audit_db)?;
+        connection.execute(
+            "
+            INSERT INTO audit_events (
+                requester_channel, requester_user_id, action, risk_level, summary
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ",
+            (
+                requester_channel_label(&requester.channel),
+                &requester.user_id,
+                action,
+                risk_label(&plan.risk),
+                &plan.summary,
+            ),
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConfirmationPreview {
+    id: String,
+    code_hint: String,
+    expires_at: String,
+}
+
+fn unix_epoch_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+fn requester_channel_label(channel: &RequesterChannel) -> &'static str {
+    match channel {
+        RequesterChannel::Gui => "gui",
+        RequesterChannel::Cli => "cli",
+        RequesterChannel::Telegram => "telegram",
+    }
+}
+
+fn risk_label(risk: &RiskLevel) -> &'static str {
+    match risk {
+        RiskLevel::ReadOnly => "ReadOnly",
+        RiskLevel::NormalMutating => "NormalMutating",
+        RiskLevel::Destructive => "Destructive",
+        RiskLevel::Experimental => "Experimental",
     }
 }
 

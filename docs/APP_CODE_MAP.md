@@ -24,9 +24,10 @@ This map explains where to work in the Hermes Control Rust workspace.
   - Config parsing and validation.
   - Local read-only status collection.
   - WSL verbose-list parser and fixed `wsl.exe --list --verbose` command spec.
+  - Phase 4 WSL/Hermes operation plan builders and dry-run command previews.
   - HTTP endpoint checks and vLLM `/v1/models` parsing.
   - Local log-tail helper.
-  - Future home for typed operation planning shared by daemon and tests.
+  - Future home for executor abstractions shared by daemon and tests.
 
 - `crates/hermes-control-daemon`
   - Axum daemon surface.
@@ -34,8 +35,10 @@ This map explains where to work in the Hermes Control Rust workspace.
     route, and audit summaries.
   - SQLite state/audit initialization for active route, operation state,
     confirmations, and audit events.
-  - Phase 3 still needs mutating route contracts, operation locking,
-    confirmation flow, cancellation, and audit append behavior.
+  - WSL/Hermes action routes for dry-run previews and destructive-action
+    confirmation records.
+  - Still needs operation locking, confirmation/cancel execution flow, and real
+    command executor behavior.
 
 - `crates/hermes-control-cli`
   - Clap command definitions and CLI rendering.
@@ -71,6 +74,10 @@ This map explains where to work in the Hermes Control Rust workspace.
   mapping, and no raw subprocess boundary.
 - `crates/hermes-control-daemon/tests/phase3_api.rs`: daemon bearer auth,
   SQLite initialization, and read-only API route behavior.
+- `crates/hermes-control-core/tests/phase4_operation_plans.rs`: WSL/Hermes typed
+  operation planning and command-preview behavior.
+- `crates/hermes-control-daemon/tests/phase4_actions.rs`: daemon dry-run action
+  responses, confirmation records, and audit preview events.
 
 ## Where To Make Changes
 
@@ -83,5 +90,7 @@ This map explains where to work in the Hermes Control Rust workspace.
   integration tests.
 - New WSL/vLLM/Hermes mutating operation: start with typed operation specs and
   dry-run summaries; daemon owns execution and audit.
+- New WSL/Hermes executor behavior: write tests around the executor abstraction
+  first, then connect it to confirmed daemon operations.
 - GUI work: keep it as daemon-client GUI surface; do not give it machine-control
   authority.

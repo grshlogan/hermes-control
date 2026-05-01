@@ -313,3 +313,25 @@ pub struct AuditEventSummary {
     pub risk_level: String,
     pub summary: String,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandPreview {
+    pub program: String,
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationResponse {
+    pub status: String,
+    pub risk: RiskLevel,
+    pub summary: String,
+    pub dry_run: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub commands: Vec<CommandPreview>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confirmation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+}

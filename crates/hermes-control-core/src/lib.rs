@@ -6,8 +6,9 @@ use std::{
 };
 
 use hermes_control_types::{
-    ControlConfig, EndpointStatus, HealthStatus, ModelRuntimeSummary, ModelRuntimesConfig,
-    ProvidersConfig, ReadOnlyStatus, StateSummary, WslDistroStatus,
+    CommandPreview, ControlConfig, EndpointStatus, HealthStatus, HermesAction, ModelRuntimeSummary,
+    ModelRuntimesConfig, ProvidersConfig, ReadOnlyStatus, RiskLevel, StateSummary, WslAction,
+    WslDistroStatus,
 };
 use serde_json::Value;
 use thiserror::Error;
@@ -128,6 +129,163 @@ impl WslCommandSpec {
 pub struct FixedCommand {
     pub program: FixedProgram,
     pub args: Vec<String>,
+}
+
+impl FixedCommand {
+    fn preview(&self) -> CommandPreview {
+        CommandPreview {
+            program: self.program.executable().to_owned(),
+            args: self.args.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationPlan {
+    pub risk: RiskLevel,
+    pub summary: String,
+    pub commands: Vec<CommandPreview>,
+    pub requires_confirmation: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WslController {
+    distro: String,
+    default_user: String,
+}
+
+impl WslController {
+    pub fn new(distro: impl Into<String>) -> Self {
+        Self {
+            distro: distro.into(),
+            default_user: "hermes".to_owned(),
+        }
+    }
+
+    pub fn with_default_user(distro: impl Into<String>, default_user: impl Into<String>) -> Self {
+        Self {
+            distro: distro.into(),
+            default_user: default_user.into(),
+        }
+    }
+
+    pub fn plan(&self, action: WslAction) -> OperationPlan {
+        match action {
+            WslAction::Wake => OperationPlan {
+                risk: RiskLevel::NormalMutating,
+                summary: format!("Wake WSL distro {}", self.distro),
+                commands: vec![self.wake_command()],
+                requires_confirmation: false,
+            },
+            WslAction::StopDistro => OperationPlan {
+                risk: RiskLevel::Destructive,
+                summary: format!(
+                    "Stop WSL distro {} and terminate in-distro processes.",
+                    self.distro
+                ),
+                commands: vec![self.terminate_command()],
+                requires_confirmation: true,
+            },
+            WslAction::RestartDistro => OperationPlan {
+                risk: RiskLevel::Destructive,
+                summary: format!(
+                    "Restart WSL distro {}. Hermes runtime and local model processes in that distro may stop.",
+                    self.distro
+                ),
+                commands: vec![self.terminate_command(), self.wake_command()],
+                requires_confirmation: true,
+            },
+            WslAction::ShutdownAll => OperationPlan {
+                risk: RiskLevel::Destructive,
+                summary: "Shutdown all WSL distributions and terminate all in-distro processes."
+                    .to_owned(),
+                commands: vec![
+                    FixedCommand {
+                        program: FixedProgram::WslExe,
+                        args: vec!["--shutdown".to_owned()],
+                    }
+                    .preview(),
+                ],
+                requires_confirmation: true,
+            },
+        }
+    }
+
+    fn terminate_command(&self) -> CommandPreview {
+        FixedCommand {
+            program: FixedProgram::WslExe,
+            args: vec!["--terminate".to_owned(), self.distro.clone()],
+        }
+        .preview()
+    }
+
+    fn wake_command(&self) -> CommandPreview {
+        FixedCommand {
+            program: FixedProgram::WslExe,
+            args: vec![
+                "--distribution".to_owned(),
+                self.distro.clone(),
+                "--user".to_owned(),
+                self.default_user.clone(),
+                "--exec".to_owned(),
+                "true".to_owned(),
+            ],
+        }
+        .preview()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HermesRuntimeController {
+    agent_root: String,
+    health_url: String,
+}
+
+impl HermesRuntimeController {
+    pub fn new(agent_root: impl Into<String>, health_url: impl Into<String>) -> Self {
+        Self {
+            agent_root: agent_root.into(),
+            health_url: health_url.into(),
+        }
+    }
+
+    pub fn plan(&self, action: HermesAction) -> OperationPlan {
+        match action {
+            HermesAction::Wake => OperationPlan {
+                risk: RiskLevel::NormalMutating,
+                summary: format!(
+                    "Wake Hermes runtime at {} and verify health at {}.",
+                    self.agent_root, self.health_url
+                ),
+                commands: Vec::new(),
+                requires_confirmation: false,
+            },
+            HermesAction::Stop => OperationPlan {
+                risk: RiskLevel::Destructive,
+                summary: format!("Stop Hermes runtime at {}.", self.agent_root),
+                commands: Vec::new(),
+                requires_confirmation: true,
+            },
+            HermesAction::Restart => OperationPlan {
+                risk: RiskLevel::Destructive,
+                summary: format!(
+                    "Restart Hermes runtime at {} and verify health at {}.",
+                    self.agent_root, self.health_url
+                ),
+                commands: Vec::new(),
+                requires_confirmation: true,
+            },
+            HermesAction::Kill => OperationPlan {
+                risk: RiskLevel::Destructive,
+                summary: format!(
+                    "Kill Hermes runtime at {}. Daemon and last-known-good route stay outside the runtime.",
+                    self.agent_root
+                ),
+                commands: Vec::new(),
+                requires_confirmation: true,
+            },
+        }
+    }
 }
 
 pub fn run_wsl_list_verbose() -> Result<Vec<WslDistroStatus>, ConfigError> {
