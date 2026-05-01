@@ -335,3 +335,10 @@ pub struct OperationResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<String>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfirmationLifecycleResponse {
+    pub status: String,
+    pub confirmation_id: String,
+    pub summary: String,
+}

@@ -90,7 +90,124 @@ async fn hermes_destructive_action_creates_confirmation_and_audit_preview() {
     assert_eq!(audit_count, 1);
 }
 
+#[tokio::test]
+async fn pending_confirmation_locks_second_mutating_action_until_confirmed() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let first = post_json(
+        router.clone(),
+        "/v1/hermes/action",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase4-test"},
+            "action": "Restart",
+            "reason": "phase4 lock test",
+            "dry_run": false
+        }),
+    )
+    .await;
+    assert_eq!(first["status"], "confirmation_required");
+
+    let locked = post_raw_json(
+        router.clone(),
+        "/v1/wsl/action",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase4-test"},
+            "action": "RestartDistro",
+            "reason": "phase4 lock test",
+            "dry_run": false
+        }),
+    )
+    .await;
+    assert_eq!(locked.status, StatusCode::CONFLICT);
+
+    let confirmed = post_json(
+        router.clone(),
+        "/v1/confirm",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase4-test"},
+            "code": first["code_hint"]
+        }),
+    )
+    .await;
+    assert_eq!(confirmed["status"], "confirmed");
+
+    let after_confirm = post_json(
+        router,
+        "/v1/wsl/action",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase4-test"},
+            "action": "RestartDistro",
+            "reason": "phase4 lock test",
+            "dry_run": false
+        }),
+    )
+    .await;
+    assert_eq!(after_confirm["status"], "confirmation_required");
+    assert_eq!(
+        confirmation_statuses(&fixture.state_db),
+        vec!["confirmed".to_owned(), "pending".to_owned()]
+    );
+}
+
+#[tokio::test]
+async fn cancel_marks_pending_confirmation_cancelled_and_releases_lock() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let first = post_json(
+        router.clone(),
+        "/v1/hermes/action",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase4-test"},
+            "action": "Kill",
+            "reason": "phase4 cancel test",
+            "dry_run": false
+        }),
+    )
+    .await;
+    assert_eq!(first["status"], "confirmation_required");
+
+    let cancelled = post_json(
+        router.clone(),
+        "/v1/cancel",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase4-test"}
+        }),
+    )
+    .await;
+    assert_eq!(cancelled["status"], "cancelled");
+
+    let second = post_json(
+        router,
+        "/v1/hermes/action",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase4-test"},
+            "action": "Restart",
+            "reason": "phase4 cancel test",
+            "dry_run": false
+        }),
+    )
+    .await;
+    assert_eq!(second["status"], "confirmation_required");
+    assert_eq!(
+        confirmation_statuses(&fixture.state_db),
+        vec!["cancelled".to_owned(), "pending".to_owned()]
+    );
+}
+
 async fn post_json(router: Router, path: &str, body: Value) -> Value {
+    let response = post_raw_json(router, path, body).await;
+    assert_eq!(response.status, StatusCode::OK);
+    serde_json::from_slice(&response.body).expect("response should be JSON")
+}
+
+struct TestResponse {
+    status: StatusCode,
+    body: Vec<u8>,
+}
+
+async fn post_raw_json(router: Router, path: &str, body: Value) -> TestResponse {
     let response = router
         .oneshot(
             Request::builder()
@@ -103,11 +220,14 @@ async fn post_json(router: Router, path: &str, body: Value) -> Value {
         )
         .await
         .expect("request should complete");
-    assert_eq!(response.status(), StatusCode::OK);
+    let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("body should collect");
-    serde_json::from_slice(&bytes).expect("response should be JSON")
+    TestResponse {
+        status,
+        body: bytes.to_vec(),
+    }
 }
 
 fn row_count(path: &Path, table: &str) -> i64 {
@@ -117,6 +237,18 @@ fn row_count(path: &Path, table: &str) -> i64 {
             row.get(0)
         })
         .expect("row count should read")
+}
+
+fn confirmation_statuses(path: &Path) -> Vec<String> {
+    let connection = Connection::open(path).expect("database should open");
+    let mut statement = connection
+        .prepare("SELECT status FROM confirmations ORDER BY created_at, id")
+        .expect("status query should prepare");
+    statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("status query should run")
+        .map(|row| row.expect("status should read"))
+        .collect()
 }
 
 struct Fixture {

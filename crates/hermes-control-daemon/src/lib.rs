@@ -17,9 +17,10 @@ use hermes_control_core::{
     load_config_dir,
 };
 use hermes_control_types::{
-    ActionRequest, ActiveRouteStatus, AuditEventSummary, HealthStatus, HermesAction,
-    ModelRuntimeSummary, OperationResponse, ProviderConfig, ReadOnlyStatus, Requester,
-    RequesterChannel, RiskLevel, WslAction,
+    ActionRequest, ActiveRouteStatus, AuditEventSummary, CancelRequest, ConfirmRequest,
+    ConfirmationLifecycleResponse, HealthStatus, HermesAction, ModelRuntimeSummary,
+    OperationResponse, ProviderConfig, ReadOnlyStatus, Requester, RequesterChannel, RiskLevel,
+    WslAction,
 };
 use rusqlite::{Connection, OptionalExtension};
 use thiserror::Error;
@@ -86,6 +87,8 @@ pub fn build_router(
         .route("/v1/wsl/action", post(wsl_action))
         .route("/v1/hermes/status", get(hermes_status))
         .route("/v1/hermes/action", post(hermes_action))
+        .route("/v1/confirm", post(confirm_action))
+        .route("/v1/cancel", post(cancel_action))
         .with_state(state))
 }
 
@@ -255,6 +258,13 @@ fn operation_response(
     if plan.requires_confirmation
         && matches!(plan.risk, RiskLevel::Destructive | RiskLevel::Experimental)
     {
+        if state.store.has_active_operation().map_err(|err| {
+            tracing::warn!(error = %err, "failed to check operation lock");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })? {
+            return Err(StatusCode::CONFLICT);
+        }
+
         let confirmation = state
             .store
             .create_confirmation(&requester, &action, &plan)
@@ -299,6 +309,38 @@ fn operation_response(
         code_hint: None,
         expires_at: None,
     })
+}
+
+async fn confirm_action(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ConfirmRequest>,
+) -> ApiResult<ConfirmationLifecycleResponse> {
+    require_auth(&state, &headers)?;
+    state
+        .store
+        .confirm_pending(&request.requester, &request.code)
+        .map(Json)
+        .map_err(|err| {
+            tracing::warn!(error = %err, "failed to confirm operation");
+            StatusCode::NOT_FOUND
+        })
+}
+
+async fn cancel_action(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CancelRequest>,
+) -> ApiResult<ConfirmationLifecycleResponse> {
+    require_auth(&state, &headers)?;
+    state
+        .store
+        .cancel_pending(&request.requester)
+        .map(Json)
+        .map_err(|err| {
+            tracing::warn!(error = %err, "failed to cancel operation");
+            StatusCode::NOT_FOUND
+        })
 }
 
 fn require_auth(state: &AppState, headers: &HeaderMap) -> Result<(), StatusCode> {
@@ -441,21 +483,37 @@ impl DaemonStateStore {
         action: &str,
         plan: &OperationPlan,
     ) -> Result<ConfirmationPreview, DaemonError> {
-        let now = unix_epoch_seconds();
+        let now = unix_epoch_nanos();
+        let operation_id = format!("op_{now}");
         let id = format!("confirm_{now}");
         let code_hint = format!("HERMES-{:04}", now % 10000);
-        let expires_at = format!("unix:{}", now + 300);
+        let expires_at = format!("unix:{}", unix_epoch_seconds() + 300);
         let connection = Connection::open(&*self.state_db)?;
+        connection.execute(
+            "
+            INSERT INTO operation_state (
+                id, action, status, requester_channel, requester_user_id
+            )
+            VALUES (?1, ?2, 'pending_confirmation', ?3, ?4)
+            ",
+            (
+                &operation_id,
+                action,
+                requester_channel_label(&requester.channel),
+                &requester.user_id,
+            ),
+        )?;
         connection.execute(
             "
             INSERT INTO confirmations (
                 id, operation_id, requester_channel, requester_user_id, action,
                 risk_level, code_hash, expires_at, status
             )
-            VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6, ?7, 'pending')
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending')
             ",
             (
                 &id,
+                &operation_id,
                 requester_channel_label(&requester.channel),
                 &requester.user_id,
                 action,
@@ -496,6 +554,142 @@ impl DaemonStateStore {
         )?;
         Ok(())
     }
+
+    fn has_active_operation(&self) -> Result<bool, DaemonError> {
+        let connection = Connection::open(&*self.state_db)?;
+        let count = connection.query_row(
+            "
+            SELECT COUNT(*)
+            FROM operation_state
+            WHERE status IN ('pending_confirmation', 'running')
+            ",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    fn confirm_pending(
+        &self,
+        requester: &Requester,
+        code: &str,
+    ) -> Result<ConfirmationLifecycleResponse, DaemonError> {
+        let pending = self.find_pending_confirmation(requester, Some(code))?;
+        let connection = Connection::open(&*self.state_db)?;
+        connection.execute(
+            "UPDATE confirmations SET status = 'confirmed' WHERE id = ?1 AND status = 'pending'",
+            [&pending.confirmation_id],
+        )?;
+        connection.execute(
+            "UPDATE operation_state SET status = 'confirmed', updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            [&pending.operation_id],
+        )?;
+        self.append_audit_summary(
+            requester,
+            &pending.action,
+            "NormalMutating",
+            &format!("Confirmed pending operation {}", pending.confirmation_id),
+        )?;
+
+        Ok(ConfirmationLifecycleResponse {
+            status: "confirmed".to_owned(),
+            confirmation_id: pending.confirmation_id,
+            summary: "Pending operation confirmed; executor is not wired yet.".to_owned(),
+        })
+    }
+
+    fn cancel_pending(
+        &self,
+        requester: &Requester,
+    ) -> Result<ConfirmationLifecycleResponse, DaemonError> {
+        let pending = self.find_pending_confirmation(requester, None)?;
+        let connection = Connection::open(&*self.state_db)?;
+        connection.execute(
+            "UPDATE confirmations SET status = 'cancelled' WHERE id = ?1 AND status = 'pending'",
+            [&pending.confirmation_id],
+        )?;
+        connection.execute(
+            "UPDATE operation_state SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            [&pending.operation_id],
+        )?;
+        self.append_audit_summary(
+            requester,
+            &pending.action,
+            "NormalMutating",
+            &format!("Cancelled pending operation {}", pending.confirmation_id),
+        )?;
+
+        Ok(ConfirmationLifecycleResponse {
+            status: "cancelled".to_owned(),
+            confirmation_id: pending.confirmation_id,
+            summary: "Pending operation cancelled.".to_owned(),
+        })
+    }
+
+    fn find_pending_confirmation(
+        &self,
+        requester: &Requester,
+        code: Option<&str>,
+    ) -> Result<PendingConfirmation, DaemonError> {
+        let connection = Connection::open(&*self.state_db)?;
+        let mut sql = "
+            SELECT id, operation_id, action
+            FROM confirmations
+            WHERE status = 'pending'
+              AND requester_channel = ?1
+              AND requester_user_id = ?2
+        "
+        .to_owned();
+        if code.is_some() {
+            sql.push_str(" AND code_hash = ?3");
+        }
+        sql.push_str(" ORDER BY created_at DESC, id DESC LIMIT 1");
+
+        let channel = requester_channel_label(&requester.channel);
+        match code {
+            Some(code) => connection.query_row(&sql, (channel, &requester.user_id, code), |row| {
+                Ok(PendingConfirmation {
+                    confirmation_id: row.get(0)?,
+                    operation_id: row.get(1)?,
+                    action: row.get(2)?,
+                })
+            }),
+            None => connection.query_row(&sql, (channel, &requester.user_id), |row| {
+                Ok(PendingConfirmation {
+                    confirmation_id: row.get(0)?,
+                    operation_id: row.get(1)?,
+                    action: row.get(2)?,
+                })
+            }),
+        }
+        .map_err(Into::into)
+    }
+
+    fn append_audit_summary(
+        &self,
+        requester: &Requester,
+        action: &str,
+        risk_level: &str,
+        summary: &str,
+    ) -> Result<(), DaemonError> {
+        let connection = Connection::open(&*self.audit_db)?;
+        connection.execute(
+            "
+            INSERT INTO audit_events (
+                requester_channel, requester_user_id, action, risk_level, summary
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ",
+            (
+                requester_channel_label(&requester.channel),
+                &requester.user_id,
+                action,
+                risk_level,
+                summary,
+            ),
+        )?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -505,10 +699,24 @@ struct ConfirmationPreview {
     expires_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingConfirmation {
+    confirmation_id: String,
+    operation_id: String,
+    action: String,
+}
+
 fn unix_epoch_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+fn unix_epoch_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
         .unwrap_or(0)
 }
 

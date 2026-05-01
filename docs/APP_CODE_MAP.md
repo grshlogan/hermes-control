@@ -37,8 +37,8 @@ This map explains where to work in the Hermes Control Rust workspace.
     confirmations, and audit events.
   - WSL/Hermes action routes for dry-run previews and destructive-action
     confirmation records.
-  - Still needs operation locking, confirmation/cancel execution flow, and real
-    command executor behavior.
+  - Confirmation/cancel endpoints and pending operation lock.
+  - Still needs real command executor behavior after confirmation.
 
 - `crates/hermes-control-cli`
   - Clap command definitions and CLI rendering.
@@ -77,7 +77,8 @@ This map explains where to work in the Hermes Control Rust workspace.
 - `crates/hermes-control-core/tests/phase4_operation_plans.rs`: WSL/Hermes typed
   operation planning and command-preview behavior.
 - `crates/hermes-control-daemon/tests/phase4_actions.rs`: daemon dry-run action
-  responses, confirmation records, and audit preview events.
+  responses, confirmation records, audit preview events, confirm/cancel, and
+  operation-lock release behavior.
 
 ## Where To Make Changes
 

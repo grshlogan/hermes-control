@@ -117,3 +117,18 @@ unimplemented ideas here.
 - Added Phase 4 tests for core operation plans and daemon action routes.
 - Real WSL/Hermes process execution remains intentionally unimplemented until an
   executor abstraction, operation lock, and confirmation lifecycle are tested.
+
+## 2026-05-02: Phase 4 confirmation lifecycle and operation lock added
+
+- Added daemon `/v1/confirm` and `/v1/cancel` routes.
+- Destructive non-dry-run WSL/Hermes actions now create an `operation_state`
+  row alongside the pending confirmation.
+- A pending confirmation now locks out a second mutating action with HTTP
+  conflict until the operation is confirmed or cancelled.
+- Confirmation marks the pending confirmation and operation as `confirmed` and
+  appends an audit event.
+- Cancellation marks the pending confirmation and operation as `cancelled` and
+  appends an audit event.
+- Expanded Phase 4 daemon tests to cover lock rejection, confirmation release,
+  and cancellation release.
+- Real WSL/Hermes process execution remains intentionally unimplemented.
