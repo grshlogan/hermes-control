@@ -11,7 +11,9 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("missing HERMES_CONTROL_API_TOKEN"))?;
     let config = hermes_control_core::load_config_dir(&config_dir)?;
     let bind = config.control.daemon.bind.clone();
-    let router = hermes_control_daemon::build_router(&config_dir, api_token)?;
+    let executor = std::sync::Arc::new(hermes_control_daemon::WindowsCommandExecutor::default());
+    let router =
+        hermes_control_daemon::build_router_with_executor(&config_dir, api_token, executor)?;
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     tracing::info!(bind = %bind, "hermes-control-daemon listening");

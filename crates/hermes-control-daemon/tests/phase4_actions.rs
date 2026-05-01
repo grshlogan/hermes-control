@@ -9,8 +9,8 @@ use axum::{
     http::{Request, StatusCode, header::AUTHORIZATION},
 };
 use hermes_control_daemon::{
-    ExecutableOperation, ExecutionOutcome, OperationExecutor, build_router,
-    build_router_with_executor,
+    CommandOutput, CommandRunner, ExecutableOperation, ExecutionOutcome, OperationExecutor,
+    WindowsCommandExecutor, build_router, build_router_with_executor,
 };
 use rusqlite::Connection;
 use serde_json::{Value, json};
@@ -257,6 +257,113 @@ impl OperationExecutor for RecordingExecutor {
             status: "completed".to_owned(),
             summary: "recorded by test executor".to_owned(),
         }
+    }
+}
+
+#[test]
+fn windows_executor_runs_only_allowed_wsl_command_shapes() {
+    let runner = Arc::new(RecordingRunner::default());
+    let executor = WindowsCommandExecutor::new(runner.clone());
+    let operation = ExecutableOperation {
+        id: "op_test".to_owned(),
+        confirmation_id: "confirm_test".to_owned(),
+        action: "wsl::RestartDistro".to_owned(),
+        requester_channel: "cli".to_owned(),
+        requester_user_id: "phase4-test".to_owned(),
+        summary: "Restart WSL distro Ubuntu-Hermes-Codex".to_owned(),
+        commands: vec![
+            command("wsl.exe", ["--terminate", "Ubuntu-Hermes-Codex"]),
+            command(
+                "wsl.exe",
+                [
+                    "--distribution",
+                    "Ubuntu-Hermes-Codex",
+                    "--user",
+                    "hermes",
+                    "--exec",
+                    "true",
+                ],
+            ),
+        ],
+    };
+
+    let outcome = executor.execute(&operation);
+
+    assert_eq!(outcome.status, "completed");
+    assert_eq!(
+        runner.commands.lock().expect("runner lock").clone(),
+        operation.commands
+    );
+}
+
+#[test]
+fn windows_executor_rejects_non_allowlisted_programs_before_running_anything() {
+    let runner = Arc::new(RecordingRunner::default());
+    let executor = WindowsCommandExecutor::new(runner.clone());
+    let operation = ExecutableOperation {
+        id: "op_test".to_owned(),
+        confirmation_id: "confirm_test".to_owned(),
+        action: "hermes::Kill".to_owned(),
+        requester_channel: "cli".to_owned(),
+        requester_user_id: "phase4-test".to_owned(),
+        summary: "Bad command".to_owned(),
+        commands: vec![command(
+            "powershell.exe",
+            ["Stop-Process", "-Name", "python"],
+        )],
+    };
+
+    let outcome = executor.execute(&operation);
+
+    assert_eq!(outcome.status, "failed");
+    assert!(outcome.summary.contains("not allowlisted"));
+    assert!(runner.commands.lock().expect("runner lock").is_empty());
+}
+
+#[test]
+fn windows_executor_rejects_unknown_wsl_argument_shapes() {
+    let runner = Arc::new(RecordingRunner::default());
+    let executor = WindowsCommandExecutor::new(runner.clone());
+    let operation = ExecutableOperation {
+        id: "op_test".to_owned(),
+        confirmation_id: "confirm_test".to_owned(),
+        action: "wsl::Bad".to_owned(),
+        requester_channel: "cli".to_owned(),
+        requester_user_id: "phase4-test".to_owned(),
+        summary: "Bad WSL command".to_owned(),
+        commands: vec![command("wsl.exe", ["--exec", "rm", "-rf", "/"])],
+    };
+
+    let outcome = executor.execute(&operation);
+
+    assert_eq!(outcome.status, "failed");
+    assert!(outcome.summary.contains("not allowlisted"));
+    assert!(runner.commands.lock().expect("runner lock").is_empty());
+}
+
+#[derive(Default)]
+struct RecordingRunner {
+    commands: Mutex<Vec<hermes_control_types::CommandPreview>>,
+}
+
+impl CommandRunner for RecordingRunner {
+    fn run(&self, command: &hermes_control_types::CommandPreview) -> CommandOutput {
+        self.commands
+            .lock()
+            .expect("runner lock")
+            .push(command.clone());
+        CommandOutput {
+            status_code: 0,
+            stdout: "ok".to_owned(),
+            stderr: String::new(),
+        }
+    }
+}
+
+fn command<const N: usize>(program: &str, args: [&str; N]) -> hermes_control_types::CommandPreview {
+    hermes_control_types::CommandPreview {
+        program: program.to_owned(),
+        args: args.into_iter().map(ToOwned::to_owned).collect(),
     }
 }
 

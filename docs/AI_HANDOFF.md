@@ -5,7 +5,9 @@ Hermes Control is now a Rust workspace with Phase 1 and Phase 2 complete. Phase
 Phase 4 has typed WSL/Hermes operation planning, dry-run previews,
 destructive-action confirmation records, confirm/cancel endpoints, and a pending
 operation lock. Confirmed operations now flow through an injectable executor
-abstraction; the default executor is a no-op that does not run system commands.
+abstraction. The daemon binary wires an allowlisted Windows command executor for
+confirmed operations; library/test router defaults can still use no-op or fake
+executors.
 
 ## Phase Report
 
@@ -54,8 +56,14 @@ Phase 4 has started:
 - `/v1/confirm` marks the pending confirmation, passes the stored operation to
   an injected executor, and records the executor outcome.
 - `/v1/cancel` marks the pending confirmation and operation as cancelled.
-- Real process execution is still not implemented; the default executor is
-  intentionally no-op.
+- `WindowsCommandExecutor` validates all command previews before running
+  anything and currently allows only fixed WSL command shapes:
+  `wsl.exe --shutdown`, `wsl.exe --terminate <safe-distro>`, and
+  `wsl.exe --distribution <safe-distro> --user <safe-user> --exec true`.
+- The daemon binary uses `WindowsCommandExecutor`; tests use fake or no-op
+  executors.
+- Hermes runtime process execution remains intentionally unimplemented until
+  typed Hermes command builders and failure handling are covered.
 
 ## Current Runtime Observation
 
@@ -73,18 +81,19 @@ runtime claims.
 
 Latest pushed commits:
 
+- `87ac3dc feat: add injectable operation executor`
+- `c865ed5 feat: add confirmation lifecycle and operation lock`
+- `3e4f2f1 feat: add phase4 typed operation previews`
 - `2d49981 feat: start daemon API and SQLite state`
 - `4bc4d1d docs: add AI handoff and change log`
-- `a797a07 docs: clarify Tauri GUI adoption boundary`
-- `1049326 feat: add read-only core and CLI status`
 
 ## Current Phase
 
 Phase 4 remaining work should stay focused on safe execution after the typed
 planning layer:
 
-- Add a real Windows command executor behind feature/explicit wiring after more
-  tests around failure handling and command allowlists.
+- Extend real execution beyond the current WSL allowlist only through typed
+  builders and focused tests.
 - Keep WSL/Hermes real execution behind typed builders, audit, confirmation, and
   the operation lock.
 - Move CLI mutating commands to daemon API calls after executor behavior is

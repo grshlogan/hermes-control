@@ -38,9 +38,11 @@ This map explains where to work in the Hermes Control Rust workspace.
   - WSL/Hermes action routes for dry-run previews and destructive-action
     confirmation records.
   - Confirmation/cancel endpoints and pending operation lock.
-  - Injectable `OperationExecutor`; default executor is no-op and does not run
-    system commands.
-  - Still needs real command executor wiring after allowlist/failure tests.
+  - Injectable `OperationExecutor`; `build_router()` defaults to no-op for safe
+    library/test usage.
+  - Daemon binary wires `WindowsCommandExecutor`, which executes only
+    allowlisted WSL command-preview shapes after confirmation.
+  - Still needs typed Hermes runtime execution and broader failure handling.
 
 - `crates/hermes-control-cli`
   - Clap command definitions and CLI rendering.
@@ -81,7 +83,7 @@ This map explains where to work in the Hermes Control Rust workspace.
 - `crates/hermes-control-daemon/tests/phase4_actions.rs`: daemon dry-run action
   responses, confirmation records, audit preview events, confirm/cancel, and
   operation-lock release behavior, plus injected executor dispatch after
-  confirmation.
+  confirmation and Windows command allowlist enforcement.
 
 ## Where To Make Changes
 
@@ -95,6 +97,7 @@ This map explains where to work in the Hermes Control Rust workspace.
 - New WSL/vLLM/Hermes mutating operation: start with typed operation specs and
   dry-run summaries; daemon owns execution and audit.
 - New WSL/Hermes executor behavior: write tests around the executor abstraction
-  first, then connect it to confirmed daemon operations.
+  first, then connect it to confirmed daemon operations. Real process execution
+  must pass through the daemon allowlist.
 - GUI work: keep it as daemon-client GUI surface; do not give it machine-control
   authority.

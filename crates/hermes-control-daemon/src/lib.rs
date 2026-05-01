@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
+    process::Command,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -74,6 +75,104 @@ pub struct ExecutionOutcome {
 
 pub trait OperationExecutor: Send + Sync + 'static {
     fn execute(&self, operation: &ExecutableOperation) -> ExecutionOutcome;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandOutput {
+    pub status_code: i32,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+pub trait CommandRunner: Send + Sync + 'static {
+    fn run(&self, command: &CommandPreview) -> CommandOutput;
+}
+
+#[derive(Debug, Default)]
+pub struct WindowsProcessRunner;
+
+impl CommandRunner for WindowsProcessRunner {
+    fn run(&self, command: &CommandPreview) -> CommandOutput {
+        match Command::new(&command.program).args(&command.args).output() {
+            Ok(output) => CommandOutput {
+                status_code: output.status.code().unwrap_or(-1),
+                stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            },
+            Err(err) => CommandOutput {
+                status_code: -1,
+                stdout: String::new(),
+                stderr: err.to_string(),
+            },
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct WindowsCommandExecutor {
+    runner: Arc<dyn CommandRunner>,
+}
+
+impl Default for WindowsCommandExecutor {
+    fn default() -> Self {
+        Self::new(Arc::new(WindowsProcessRunner))
+    }
+}
+
+impl WindowsCommandExecutor {
+    pub fn new(runner: Arc<dyn CommandRunner>) -> Self {
+        Self { runner }
+    }
+}
+
+impl OperationExecutor for WindowsCommandExecutor {
+    fn execute(&self, operation: &ExecutableOperation) -> ExecutionOutcome {
+        for command in &operation.commands {
+            if !is_allowlisted_command(command) {
+                return ExecutionOutcome {
+                    status: "failed".to_owned(),
+                    summary: format!(
+                        "Command is not allowlisted for execution: {} {}",
+                        command.program,
+                        command.args.join(" ")
+                    ),
+                };
+            }
+        }
+
+        if operation.commands.is_empty() {
+            return ExecutionOutcome {
+                status: "completed".to_owned(),
+                summary: format!(
+                    "Operation {} has no command previews to execute.",
+                    operation.id
+                ),
+            };
+        }
+
+        for command in &operation.commands {
+            let output = self.runner.run(command);
+            if output.status_code != 0 {
+                return ExecutionOutcome {
+                    status: "failed".to_owned(),
+                    summary: format!(
+                        "Command failed with status {}: {}",
+                        output.status_code,
+                        output.stderr.trim()
+                    ),
+                };
+            }
+        }
+
+        ExecutionOutcome {
+            status: "completed".to_owned(),
+            summary: format!(
+                "Executed {} allowlisted command(s) for {}.",
+                operation.commands.len(),
+                operation.id
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -852,6 +951,30 @@ fn ensure_state_column(
         )?;
     }
     Ok(())
+}
+
+fn is_allowlisted_command(command: &CommandPreview) -> bool {
+    if !command.program.eq_ignore_ascii_case("wsl.exe") {
+        return false;
+    }
+
+    match command.args.as_slice() {
+        [arg] if arg == "--shutdown" => true,
+        [terminate, distro] if terminate == "--terminate" => is_safe_identifier(distro),
+        [distribution, distro, user_flag, user, exec, command]
+            if distribution == "--distribution" && user_flag == "--user" && exec == "--exec" =>
+        {
+            is_safe_identifier(distro) && is_safe_identifier(user) && command == "true"
+        }
+        _ => false,
+    }
+}
+
+fn is_safe_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
 }
 
 fn unix_epoch_nanos() -> u128 {

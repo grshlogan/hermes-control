@@ -148,3 +148,17 @@ unimplemented ideas here.
 - Expanded Phase 4 daemon tests with a recording executor to verify confirm-time
   dispatch and completed operation status.
 - Real WSL/Hermes process execution remains intentionally unwired.
+
+## 2026-05-02: Phase 4 allowlisted Windows executor wired
+
+- Added `CommandRunner`, `CommandOutput`, `WindowsProcessRunner`, and
+  `WindowsCommandExecutor` in the daemon crate.
+- `WindowsCommandExecutor` validates every command preview before running
+  anything and currently allows only fixed WSL shutdown, terminate, and wake
+  probe command shapes.
+- The daemon binary now starts with `WindowsCommandExecutor`; tests and library
+  router defaults can still use fake or no-op executors.
+- Added Phase 4 daemon tests proving allowed WSL command previews execute and
+  non-allowlisted programs or WSL argument shapes are rejected without running.
+- Hermes runtime process execution remains intentionally unimplemented until its
+  typed command builders and failure handling are covered.
