@@ -1,0 +1,231 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AiProviderKind {
+    OpenAiCompatible,
+    AnthropicClaude,
+    DeepSeek,
+    Codex,
+    LocalVllm,
+    LmStudio,
+    Disabled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HermesAction {
+    Wake,
+    Stop,
+    Restart,
+    Kill,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WslAction {
+    Wake,
+    StopDistro,
+    RestartDistro,
+    ShutdownAll,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ModelAction {
+    Start,
+    Stop,
+    Restart,
+    Health,
+    Logs,
+    Benchmark,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RiskLevel {
+    ReadOnly,
+    NormalMutating,
+    Destructive,
+    Experimental,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RequesterChannel {
+    Gui,
+    Cli,
+    Telegram,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Requester {
+    pub channel: RequesterChannel,
+    pub user_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_id: Option<String>,
+}
+
+impl Requester {
+    pub fn telegram(user_id: impl Into<String>, chat_id: impl Into<String>) -> Self {
+        Self {
+            channel: RequesterChannel::Telegram,
+            user_id: user_id.into(),
+            chat_id: Some(chat_id.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionRequest<T> {
+    pub requester: Requester,
+    pub action: T,
+    pub reason: String,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RouteSwitchRequest {
+    pub requester: Requester,
+    pub profile_id: String,
+    pub reason: String,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfirmRequest {
+    pub requester: Requester,
+    pub code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelRequest {
+    pub requester: Requester,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControlConfig {
+    pub daemon: DaemonConfig,
+    pub wsl: WslConfig,
+    pub hermes: HermesConfig,
+    pub policy: PolicyConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DaemonConfig {
+    pub bind: String,
+    pub api_token_ref: String,
+    pub state_db: String,
+    pub audit_db: String,
+    pub log_dir: String,
+    pub operation_timeout_seconds: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WslConfig {
+    pub distro: String,
+    pub default_user: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HermesConfig {
+    pub agent_root: String,
+    pub health_url: String,
+    pub logs: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolicyConfig {
+    pub require_confirm_for_destructive: bool,
+    pub allow_lan_bind: bool,
+    pub allow_raw_shell: bool,
+    pub redact_secrets: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProvidersConfig {
+    pub providers: Vec<ProviderConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderConfig {
+    pub id: String,
+    pub kind: AiProviderKind,
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_ref: Option<String>,
+    #[serde(default)]
+    pub models: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_runtime: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub served_model_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelRuntimesConfig {
+    pub runtimes: Vec<ModelRuntimeConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelRuntimeConfig {
+    pub id: String,
+    pub kind: ModelRuntimeKind,
+    pub workspace: String,
+    pub wsl_distro: String,
+    pub endpoint: String,
+    pub models_endpoint: String,
+    pub log_dir: String,
+    #[serde(default)]
+    pub variants: Vec<ModelRuntimeVariant>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ModelRuntimeKind {
+    Vllm,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelRuntimeVariant {
+    pub id: String,
+    pub served_model_name: String,
+    pub mode: String,
+    pub max_model_len: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speculative_method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub num_speculative_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_offload_gb: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cuda_visible_devices: Option<String>,
+    #[serde(default)]
+    pub requires_explicit_confirm: bool,
+    pub start: ModelRuntimeStart,
+    pub stop: ModelRuntimeStop,
+    #[serde(default)]
+    pub profiles: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelRuntimeStart {
+    pub kind: ModelRuntimeStartKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelRuntimeStartKind {
+    WslScript,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelRuntimeStop {
+    pub kind: ModelRuntimeStopKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub served_model_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelRuntimeStopKind {
+    ProcessMatch,
+}

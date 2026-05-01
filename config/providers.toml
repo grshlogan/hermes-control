@@ -1,0 +1,15 @@
+[[providers]]
+id = "external.openai-compatible"
+kind = "OpenAiCompatible"
+display_name = "External OpenAI-compatible API"
+base_url = "https://example.com/v1"
+api_key_ref = "hermes/provider/external-openai-compatible"
+models = ["gpt-like-coder", "reasoner"]
+
+[[providers]]
+id = "local.vllm.qwen36-mtp"
+kind = "LocalVllm"
+display_name = "Qwen3.6 MTP via vLLM"
+base_url = "http://127.0.0.1:18080/v1"
+model_runtime = "vllm-local"
+served_model_name = "qwen36-mtp"
