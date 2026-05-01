@@ -78,6 +78,9 @@ The intended final workspace will grow toward the layout described in
 - Preserve user or unrelated local changes.
 - Do not run destructive git or filesystem operations unless explicitly asked.
 - Do not commit unless the user explicitly asks.
+- When a change appears worth committing and pushing, suggest a concise commit
+  title and wait for explicit user approval before running `git commit` or
+  `git push`.
 - Use descriptive plan/document names. Major plan files should be specific, such
   as `plan_rust_control_rewrite.md`, not generic names like
   `implementation_plan.md`.
