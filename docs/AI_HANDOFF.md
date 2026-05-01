@@ -55,6 +55,8 @@ Phase 4 has started:
   or cancelled.
 - `/v1/confirm` marks the pending confirmation, passes the stored operation to
   an injected executor, and records the executor outcome.
+- `/v1/confirm` now includes optional `execution_status` so clients can
+  distinguish confirmation success from execution success/failure.
 - `/v1/cancel` marks the pending confirmation and operation as cancelled.
 - `WindowsCommandExecutor` validates all command previews before running
   anything and currently allows only fixed WSL command shapes:
@@ -62,6 +64,8 @@ Phase 4 has started:
   `wsl.exe --distribution <safe-distro> --user <safe-user> --exec true`.
 - The daemon binary uses `WindowsCommandExecutor`; tests use fake or no-op
   executors.
+- Failed executor outcomes are stored as `failed` operation state and release
+  the pending operation lock for a later retry.
 - Hermes runtime process execution remains intentionally unimplemented until
   typed Hermes command builders and failure handling are covered.
 

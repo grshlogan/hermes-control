@@ -18,6 +18,8 @@ This map explains where to work in the Hermes Control Rust workspace.
 - `crates/hermes-control-types`
   - Shared DTOs, config structs, request structs, status structs, enums, and
     client/daemon contracts.
+  - `ConfirmationLifecycleResponse.execution_status` reports confirmed
+    operation execution outcome when confirmation also triggers execution.
   - Change this first when a JSON/TOML/API shape changes.
 
 - `crates/hermes-control-core`
@@ -38,6 +40,8 @@ This map explains where to work in the Hermes Control Rust workspace.
   - WSL/Hermes action routes for dry-run previews and destructive-action
     confirmation records.
   - Confirmation/cancel endpoints and pending operation lock.
+  - Confirm responses expose executor outcome status, while failed outcomes are
+    stored in operation state and release the lock.
   - Injectable `OperationExecutor`; `build_router()` defaults to no-op for safe
     library/test usage.
   - Daemon binary wires `WindowsCommandExecutor`, which executes only
@@ -83,7 +87,8 @@ This map explains where to work in the Hermes Control Rust workspace.
 - `crates/hermes-control-daemon/tests/phase4_actions.rs`: daemon dry-run action
   responses, confirmation records, audit preview events, confirm/cancel, and
   operation-lock release behavior, plus injected executor dispatch after
-  confirmation and Windows command allowlist enforcement.
+  confirmation, failed execution outcome reporting, and Windows command
+  allowlist enforcement.
 
 ## Where To Make Changes
 

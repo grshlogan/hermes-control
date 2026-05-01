@@ -242,6 +242,62 @@ async fn confirm_executes_pending_operation_through_injected_executor() {
     );
 }
 
+#[tokio::test]
+async fn confirm_response_exposes_failed_execution_outcome() {
+    let fixture = Fixture::new();
+    let router = build_router_with_executor(&fixture.config_dir, TOKEN, Arc::new(FailingExecutor))
+        .expect("router should build");
+
+    let planned = post_json(
+        router.clone(),
+        "/v1/wsl/action",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase4-test"},
+            "action": "RestartDistro",
+            "reason": "phase4 failed executor test",
+            "dry_run": false
+        }),
+    )
+    .await;
+    assert_eq!(planned["status"], "confirmation_required");
+
+    let confirmed = post_json(
+        router.clone(),
+        "/v1/confirm",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase4-test"},
+            "code": planned["code_hint"]
+        }),
+    )
+    .await;
+
+    assert_eq!(confirmed["status"], "confirmed");
+    assert_eq!(confirmed["execution_status"], "failed");
+    assert!(
+        confirmed["summary"]
+            .as_str()
+            .unwrap()
+            .contains("simulated executor failure")
+    );
+    assert_eq!(
+        operation_statuses(&fixture.state_db),
+        vec!["failed".to_owned()]
+    );
+
+    let next = post_json(
+        router,
+        "/v1/hermes/action",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase4-test"},
+            "action": "Restart",
+            "reason": "phase4 lock release after failure",
+            "dry_run": false
+        }),
+    )
+    .await;
+    assert_eq!(next["status"], "confirmation_required");
+}
+
 #[derive(Default)]
 struct RecordingExecutor {
     operations: Mutex<Vec<ExecutableOperation>>,
@@ -256,6 +312,17 @@ impl OperationExecutor for RecordingExecutor {
         ExecutionOutcome {
             status: "completed".to_owned(),
             summary: "recorded by test executor".to_owned(),
+        }
+    }
+}
+
+struct FailingExecutor;
+
+impl OperationExecutor for FailingExecutor {
+    fn execute(&self, _operation: &ExecutableOperation) -> ExecutionOutcome {
+        ExecutionOutcome {
+            status: "failed".to_owned(),
+            summary: "simulated executor failure".to_owned(),
         }
     }
 }

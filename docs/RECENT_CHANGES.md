@@ -162,3 +162,12 @@ unimplemented ideas here.
   non-allowlisted programs or WSL argument shapes are rejected without running.
 - Hermes runtime process execution remains intentionally unimplemented until its
   typed command builders and failure handling are covered.
+
+## 2026-05-02: Phase 4 execution failure reporting tightened
+
+- Added optional `execution_status` to `ConfirmationLifecycleResponse`.
+- `/v1/confirm` now returns the executor outcome status alongside the
+  confirmation lifecycle status.
+- Added a daemon test proving failed execution is visible to clients, is stored
+  as a failed operation, and releases the mutating operation lock for later
+  retries.

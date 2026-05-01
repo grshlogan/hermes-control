@@ -484,6 +484,7 @@ async fn confirm_action(
         status: "confirmed".to_owned(),
         confirmation_id: operation.confirmation_id,
         summary: outcome.summary,
+        execution_status: Some(outcome.status),
     }))
 }
 
@@ -823,6 +824,7 @@ impl DaemonStateStore {
             status: "cancelled".to_owned(),
             confirmation_id: pending.confirmation_id,
             summary: "Pending operation cancelled.".to_owned(),
+            execution_status: None,
         })
     }
 
