@@ -229,3 +229,71 @@ pub struct ModelRuntimeStop {
 pub enum ModelRuntimeStopKind {
     ProcessMatch,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HealthStatus {
+    Ok,
+    Degraded,
+    Down,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndpointStatus {
+    pub url: String,
+    pub reachable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_code: Option<u16>,
+    pub message: String,
+}
+
+impl EndpointStatus {
+    pub fn ok(url: impl Into<String>, status_code: u16) -> Self {
+        Self {
+            url: url.into(),
+            reachable: true,
+            status_code: Some(status_code),
+            message: "ok".to_owned(),
+        }
+    }
+
+    pub fn unavailable(url: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            reachable: false,
+            status_code: None,
+            message: message.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WslDistroStatus {
+    pub name: String,
+    pub state: String,
+    pub version: Option<u8>,
+    pub default: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelRuntimeSummary {
+    pub runtime_id: String,
+    pub variant_id: String,
+    pub served_model_name: String,
+    pub endpoint: EndpointStatus,
+    pub ready: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StateSummary {
+    pub state_db_exists: bool,
+    pub audit_db_exists: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadOnlyStatus {
+    pub wsl: Option<WslDistroStatus>,
+    pub hermes: EndpointStatus,
+    pub models: Vec<ModelRuntimeSummary>,
+    pub state: StateSummary,
+    pub overall: HealthStatus,
+}

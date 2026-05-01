@@ -1,6 +1,10 @@
 use clap::Parser;
-use hermes_control_cli::Cli;
+use hermes_control_cli::{Cli, run_cli};
 
-fn main() {
-    let _cli = Cli::parse();
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    let output = run_cli(cli).await?;
+    println!("{output}");
+    Ok(())
 }
