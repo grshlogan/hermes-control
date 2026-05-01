@@ -60,6 +60,20 @@ It controls four things:
    - AWQ INT4 profile for stable low-memory fallback.
    - Health checks, logs, profile readiness, and benchmark history.
 
+Explicit product boundary:
+
+- Hermes Control Center is both the Hermes local control tower and the local
+  model runtime controller.
+- The primary local model loading environment is vLLM, with MTP as the main
+  low-latency profile and AWQ INT4 as the stable fallback profile.
+- The same Rust daemon owns WSL lifecycle, Hermes process lifecycle,
+  provider/account/API route switching, local vLLM readiness, and confirmation
+  / audit state.
+- vLLM remains the inference backend; Hermes Control manages when and how that
+  backend is started, checked, selected, stopped, and exposed to Hermes.
+- CLI, bot, and GUI are client surfaces for this daemon and must not become
+  separate model/process authorities.
+
 ---
 
 ## 2. Recommended Design Baseline

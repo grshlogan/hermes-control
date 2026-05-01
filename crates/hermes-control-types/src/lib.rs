@@ -297,3 +297,19 @@ pub struct ReadOnlyStatus {
     pub state: StateSummary,
     pub overall: HealthStatus,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveRouteStatus {
+    pub active_profile_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditEventSummary {
+    pub id: i64,
+    pub happened_at: String,
+    pub requester_channel: String,
+    pub requester_user_id: String,
+    pub action: String,
+    pub risk_level: String,
+    pub summary: String,
+}

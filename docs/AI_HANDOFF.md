@@ -1,8 +1,8 @@
 # AI Handoff
 
-Hermes Control is now a Rust workspace with the Phase 1 skeleton and Phase 2
-read-only core/CLI complete; Phase 3 should make the daemon the real state and
-API authority.
+Hermes Control is now a Rust workspace with Phase 1 and Phase 2 complete; Phase
+3 has started by giving the daemon authenticated read-only API routes and
+SQLite state/audit foundations.
 
 ## Phase Report
 
@@ -24,6 +24,17 @@ Phase 2 is complete:
 - Read-only DTOs live in `hermes-control-types`.
 - Workspace build, tests, fmt, and clippy passed before the Phase 2 commit.
 
+Phase 3 has started:
+
+- `hermes-control-daemon` builds authenticated Axum routes for `/v1/status`,
+  `/v1/health`, `/v1/providers`, `/v1/models`, `/v1/route/active`, and
+  `/v1/audit`.
+- Daemon routes require `Authorization: Bearer <token>`.
+- Build-time daemon initialization creates SQLite state and audit databases.
+- Initial state tables cover active route, operation state, and confirmations.
+- Initial audit table covers append-only audit event summaries.
+- Mutating operation execution is still not implemented.
+
 ## Current Runtime Observation
 
 The last CLI smoke check observed:
@@ -40,21 +51,20 @@ runtime claims.
 
 Latest pushed commits:
 
+- `4bc4d1d docs: add AI handoff and change log`
 - `a797a07 docs: clarify Tauri GUI adoption boundary`
 - `1049326 feat: add read-only core and CLI status`
 - `e9e957a docs: require approval before commit and push`
-- `848f366 chore: initialize hermes control workspace`
 
-## Next Phase
+## Current Phase
 
-Phase 3 should focus on daemon API and SQLite state:
+Phase 3 remaining work should stay focused on daemon API and SQLite state:
 
-- Build the real Axum daemon routes for read-only endpoints first.
-- Add bearer-token auth and localhost bind behavior.
-- Add SQLite state and audit migrations.
-- Define active route/profile state.
 - Add operation lock, confirmation records, cancellation records, and audit
-  append flow.
+  append flow for mutating requests.
+- Add typed daemon request/response contracts for route switching and runtime
+  actions.
+- Move CLI mutating commands to daemon API calls when those routes exist.
 - Keep mutating WSL/vLLM/Hermes operations as planned or dry-run only until
   typed operation builders and tests exist.
 

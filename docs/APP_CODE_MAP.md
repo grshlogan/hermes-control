@@ -30,9 +30,12 @@ This map explains where to work in the Hermes Control Rust workspace.
 
 - `crates/hermes-control-daemon`
   - Axum daemon surface.
-  - Currently a skeleton `/v1/status` route.
-  - Phase 3 should add real read-only routes, auth, SQLite state, audit,
-    confirmation, cancellation, and operation locking.
+  - Authenticated read-only routes for status, health, providers, models, active
+    route, and audit summaries.
+  - SQLite state/audit initialization for active route, operation state,
+    confirmations, and audit events.
+  - Phase 3 still needs mutating route contracts, operation locking,
+    confirmation flow, cancellation, and audit append behavior.
 
 - `crates/hermes-control-cli`
   - Clap command definitions and CLI rendering.
@@ -66,6 +69,8 @@ This map explains where to work in the Hermes Control Rust workspace.
   rendering behavior.
 - `crates/hermes-control-bot/tests/bot_boundary.rs`: bot allowlist, command
   mapping, and no raw subprocess boundary.
+- `crates/hermes-control-daemon/tests/phase3_api.rs`: daemon bearer auth,
+  SQLite initialization, and read-only API route behavior.
 
 ## Where To Make Changes
 

@@ -85,3 +85,18 @@ unimplemented ideas here.
 - Added `docs/AI_CHANGE_GUIDE.md` for AI/dev modification rules.
 - Added `docs/AI_HANDOFF.md` with Phase 1/2 report and Phase 3 handoff.
 - Added `docs/APP_CODE_MAP.md` with crate responsibility map and task routing.
+
+## 2026-05-02: Phase 3 daemon API and state foundation started
+
+- Clarified in `plan_rust_control_rewrite.md` that Hermes Control is both the
+  vLLM/MTP local runtime manager and the Hermes/WSL/provider route control
+  tower.
+- Added authenticated daemon routes for `/v1/status`, `/v1/health`,
+  `/v1/providers`, `/v1/models`, `/v1/route/active`, and `/v1/audit`.
+- Added bearer-token route protection using `Authorization: Bearer <token>`.
+- Added SQLite state DB initialization for active route, operation state, and
+  confirmations.
+- Added SQLite audit DB initialization for audit event summaries.
+- Added daemon Phase 3 tests covering auth, database initialization, providers,
+  active route, and model routes.
+- Mutating operation execution remains intentionally unimplemented.
