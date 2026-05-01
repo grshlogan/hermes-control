@@ -276,6 +276,8 @@ Recommended: Tauri v2 GUI with a Rust command bridge that calls daemon API.
 
 - Frontend can use React + Fluent UI React v9 or a small custom design-token implementation.
 - Rust side only exposes typed commands.
+- Tauri commands are GUI bridge commands only; they call daemon APIs and never own machine-control authority.
+- Tauri capabilities/permissions must be explicit and minimal, with no broad filesystem or shell authority.
 - No frontend-side raw process execution.
 - UI must support keyboard navigation, dark/light/system themes, and accessible contrast.
 
@@ -680,6 +682,21 @@ Reason:
 - Web frontend gives smoother animation and typography control.
 - Tauri still keeps privileged system authority in Rust, behind explicit commands.
 
+Adoption timing:
+
+- Do not let Tauri drive Phase 1-6 implementation.
+- Build daemon, typed API, state, confirmation, route, WSL, and vLLM control first.
+- Scaffold the real Tauri app in Phase 8, after CLI and bot have proven the daemon contract.
+- Before Phase 8, `hermes-control-gui` may contain only shared GUI boundary types, planning notes, or testable daemon-client helpers.
+
+Authority boundary:
+
+- Tauri frontend is a view/controller surface, not a control authority.
+- Tauri Rust commands call the local daemon API or named-pipe client only.
+- Tauri Rust commands must not call `wsl.exe`, PowerShell, shell scripts, or arbitrary process APIs directly.
+- The frontend receives redacted DTOs and confirmation prompts; it must not receive raw secrets.
+- Tauri permissions/capabilities should allow only the narrow commands needed by the GUI window/tray.
+
 ### 13.2 eframe/egui Role
 
 Do not make egui the main UI if premium UI is the priority. Use it later for an emergency rescue panel:
@@ -985,6 +1002,8 @@ Goal:
 Codex tasks:
 
 - Create Tauri v2 app.
+- Add a Tauri Rust bridge that is only a typed daemon client.
+- Define explicit Tauri capabilities/permissions for GUI and tray commands.
 - Create design-token layer.
 - Implement Dashboard, AI Route, Local Models, WSL, Hermes Runtime, Logs, Audit, Settings.
 - Implement confirmation sheet.
@@ -996,6 +1015,7 @@ Completion signal:
 - GUI can perform all normal operations without Telegram.
 - GUI status matches CLI and bot.
 - GUI has no privileged raw execution API.
+- Tauri capabilities do not expose broad filesystem, shell, or process authority.
 
 ### Phase 9 — Windows Service and Installer
 
