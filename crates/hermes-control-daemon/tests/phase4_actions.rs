@@ -8,9 +8,13 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode, header::AUTHORIZATION},
 };
-use hermes_control_daemon::build_router;
+use hermes_control_daemon::{
+    ExecutableOperation, ExecutionOutcome, OperationExecutor, build_router,
+    build_router_with_executor,
+};
 use rusqlite::Connection;
 use serde_json::{Value, json};
+use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
@@ -196,6 +200,66 @@ async fn cancel_marks_pending_confirmation_cancelled_and_releases_lock() {
     );
 }
 
+#[tokio::test]
+async fn confirm_executes_pending_operation_through_injected_executor() {
+    let fixture = Fixture::new();
+    let executor = Arc::new(RecordingExecutor::default());
+    let router = build_router_with_executor(&fixture.config_dir, TOKEN, executor.clone())
+        .expect("router should build");
+
+    let planned = post_json(
+        router.clone(),
+        "/v1/hermes/action",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase4-test"},
+            "action": "Restart",
+            "reason": "phase4 executor test",
+            "dry_run": false
+        }),
+    )
+    .await;
+    assert_eq!(planned["status"], "confirmation_required");
+
+    let confirmed = post_json(
+        router,
+        "/v1/confirm",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase4-test"},
+            "code": planned["code_hint"]
+        }),
+    )
+    .await;
+
+    assert_eq!(confirmed["status"], "confirmed");
+    let operations = executor.operations.lock().expect("executor lock");
+    assert_eq!(operations.len(), 1);
+    assert_eq!(operations[0].action, "hermes::Restart");
+    assert_eq!(operations[0].requester_user_id, "phase4-test");
+    assert!(operations[0].commands.is_empty());
+    assert_eq!(
+        operation_statuses(&fixture.state_db),
+        vec!["completed".to_owned()]
+    );
+}
+
+#[derive(Default)]
+struct RecordingExecutor {
+    operations: Mutex<Vec<ExecutableOperation>>,
+}
+
+impl OperationExecutor for RecordingExecutor {
+    fn execute(&self, operation: &ExecutableOperation) -> ExecutionOutcome {
+        self.operations
+            .lock()
+            .expect("executor lock")
+            .push(operation.clone());
+        ExecutionOutcome {
+            status: "completed".to_owned(),
+            summary: "recorded by test executor".to_owned(),
+        }
+    }
+}
+
 async fn post_json(router: Router, path: &str, body: Value) -> Value {
     let response = post_raw_json(router, path, body).await;
     assert_eq!(response.status, StatusCode::OK);
@@ -243,6 +307,18 @@ fn confirmation_statuses(path: &Path) -> Vec<String> {
     let connection = Connection::open(path).expect("database should open");
     let mut statement = connection
         .prepare("SELECT status FROM confirmations ORDER BY created_at, id")
+        .expect("status query should prepare");
+    statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("status query should run")
+        .map(|row| row.expect("status should read"))
+        .collect()
+}
+
+fn operation_statuses(path: &Path) -> Vec<String> {
+    let connection = Connection::open(path).expect("database should open");
+    let mut statement = connection
+        .prepare("SELECT status FROM operation_state ORDER BY created_at, id")
         .expect("status query should prepare");
     statement
         .query_map([], |row| row.get::<_, String>(0))

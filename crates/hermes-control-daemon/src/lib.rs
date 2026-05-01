@@ -17,8 +17,8 @@ use hermes_control_core::{
     load_config_dir,
 };
 use hermes_control_types::{
-    ActionRequest, ActiveRouteStatus, AuditEventSummary, CancelRequest, ConfirmRequest,
-    ConfirmationLifecycleResponse, HealthStatus, HermesAction, ModelRuntimeSummary,
+    ActionRequest, ActiveRouteStatus, AuditEventSummary, CancelRequest, CommandPreview,
+    ConfirmRequest, ConfirmationLifecycleResponse, HealthStatus, HermesAction, ModelRuntimeSummary,
     OperationResponse, ProviderConfig, ReadOnlyStatus, Requester, RequesterChannel, RiskLevel,
     WslAction,
 };
@@ -35,13 +35,16 @@ pub enum DaemonError {
     Io(#[from] std::io::Error),
     #[error("SQLite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct AppState {
     config_dir: Arc<PathBuf>,
     api_token: Arc<str>,
     store: DaemonStateStore,
+    executor: Arc<dyn OperationExecutor>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,9 +55,53 @@ struct DaemonStateStore {
 
 type ApiResult<T> = Result<Json<T>, StatusCode>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutableOperation {
+    pub id: String,
+    pub confirmation_id: String,
+    pub action: String,
+    pub requester_channel: String,
+    pub requester_user_id: String,
+    pub summary: String,
+    pub commands: Vec<CommandPreview>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionOutcome {
+    pub status: String,
+    pub summary: String,
+}
+
+pub trait OperationExecutor: Send + Sync + 'static {
+    fn execute(&self, operation: &ExecutableOperation) -> ExecutionOutcome;
+}
+
+#[derive(Debug, Default)]
+pub struct NoopOperationExecutor;
+
+impl OperationExecutor for NoopOperationExecutor {
+    fn execute(&self, operation: &ExecutableOperation) -> ExecutionOutcome {
+        ExecutionOutcome {
+            status: "completed".to_owned(),
+            summary: format!(
+                "No-op executor accepted operation {} without running system commands.",
+                operation.id
+            ),
+        }
+    }
+}
+
 pub fn build_router(
     config_dir: impl AsRef<Path>,
     api_token: impl Into<String>,
+) -> Result<Router, DaemonError> {
+    build_router_with_executor(config_dir, api_token, Arc::new(NoopOperationExecutor))
+}
+
+pub fn build_router_with_executor(
+    config_dir: impl AsRef<Path>,
+    api_token: impl Into<String>,
+    executor: Arc<dyn OperationExecutor>,
 ) -> Result<Router, DaemonError> {
     let config_dir = config_dir.as_ref().to_path_buf();
     let api_token = api_token.into();
@@ -74,6 +121,7 @@ pub fn build_router(
         config_dir: Arc::new(config_dir),
         api_token: Arc::<str>::from(api_token),
         store,
+        executor,
     };
 
     Ok(Router::new()
@@ -317,14 +365,27 @@ async fn confirm_action(
     Json(request): Json<ConfirmRequest>,
 ) -> ApiResult<ConfirmationLifecycleResponse> {
     require_auth(&state, &headers)?;
-    state
+    let operation = state
         .store
         .confirm_pending(&request.requester, &request.code)
-        .map(Json)
         .map_err(|err| {
             tracing::warn!(error = %err, "failed to confirm operation");
             StatusCode::NOT_FOUND
-        })
+        })?;
+    let outcome = state.executor.execute(&operation);
+    state
+        .store
+        .complete_operation(&operation, &outcome, &request.requester)
+        .map_err(|err| {
+            tracing::warn!(error = %err, "failed to complete operation");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(ConfirmationLifecycleResponse {
+        status: "confirmed".to_owned(),
+        confirmation_id: operation.confirmation_id,
+        summary: outcome.summary,
+    }))
 }
 
 async fn cancel_action(
@@ -395,6 +456,8 @@ impl DaemonStateStore {
                 status TEXT NOT NULL,
                 requester_channel TEXT NOT NULL,
                 requester_user_id TEXT NOT NULL,
+                summary TEXT NOT NULL DEFAULT '',
+                commands_json TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
@@ -412,6 +475,18 @@ impl DaemonStateStore {
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             ",
+        )?;
+        ensure_state_column(
+            &state_connection,
+            "operation_state",
+            "summary",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        ensure_state_column(
+            &state_connection,
+            "operation_state",
+            "commands_json",
+            "TEXT NOT NULL DEFAULT '[]'",
         )?;
 
         let audit_connection = Connection::open(&audit_db)?;
@@ -488,19 +563,22 @@ impl DaemonStateStore {
         let id = format!("confirm_{now}");
         let code_hint = format!("HERMES-{:04}", now % 10000);
         let expires_at = format!("unix:{}", unix_epoch_seconds() + 300);
+        let commands_json = serde_json::to_string(&plan.commands)?;
         let connection = Connection::open(&*self.state_db)?;
         connection.execute(
             "
             INSERT INTO operation_state (
-                id, action, status, requester_channel, requester_user_id
+                id, action, status, requester_channel, requester_user_id, summary, commands_json
             )
-            VALUES (?1, ?2, 'pending_confirmation', ?3, ?4)
+            VALUES (?1, ?2, 'pending_confirmation', ?3, ?4, ?5, ?6)
             ",
             (
                 &operation_id,
                 action,
                 requester_channel_label(&requester.channel),
                 &requester.user_id,
+                &plan.summary,
+                &commands_json,
             ),
         )?;
         connection.execute(
@@ -573,7 +651,7 @@ impl DaemonStateStore {
         &self,
         requester: &Requester,
         code: &str,
-    ) -> Result<ConfirmationLifecycleResponse, DaemonError> {
+    ) -> Result<ExecutableOperation, DaemonError> {
         let pending = self.find_pending_confirmation(requester, Some(code))?;
         let connection = Connection::open(&*self.state_db)?;
         connection.execute(
@@ -581,7 +659,7 @@ impl DaemonStateStore {
             [&pending.confirmation_id],
         )?;
         connection.execute(
-            "UPDATE operation_state SET status = 'confirmed', updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            "UPDATE operation_state SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
             [&pending.operation_id],
         )?;
         self.append_audit_summary(
@@ -591,11 +669,34 @@ impl DaemonStateStore {
             &format!("Confirmed pending operation {}", pending.confirmation_id),
         )?;
 
-        Ok(ConfirmationLifecycleResponse {
-            status: "confirmed".to_owned(),
+        Ok(ExecutableOperation {
+            id: pending.operation_id,
             confirmation_id: pending.confirmation_id,
-            summary: "Pending operation confirmed; executor is not wired yet.".to_owned(),
+            action: pending.action,
+            requester_channel: requester_channel_label(&requester.channel).to_owned(),
+            requester_user_id: requester.user_id.clone(),
+            summary: pending.summary,
+            commands: pending.commands,
         })
+    }
+
+    fn complete_operation(
+        &self,
+        operation: &ExecutableOperation,
+        outcome: &ExecutionOutcome,
+        requester: &Requester,
+    ) -> Result<(), DaemonError> {
+        let connection = Connection::open(&*self.state_db)?;
+        connection.execute(
+            "UPDATE operation_state SET status = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+            (&outcome.status, &operation.id),
+        )?;
+        self.append_audit_summary(
+            requester,
+            &operation.action,
+            "NormalMutating",
+            &outcome.summary,
+        )
     }
 
     fn cancel_pending(
@@ -633,32 +734,51 @@ impl DaemonStateStore {
     ) -> Result<PendingConfirmation, DaemonError> {
         let connection = Connection::open(&*self.state_db)?;
         let mut sql = "
-            SELECT id, operation_id, action
-            FROM confirmations
-            WHERE status = 'pending'
-              AND requester_channel = ?1
-              AND requester_user_id = ?2
+            SELECT c.id, c.operation_id, c.action, o.summary, o.commands_json
+            FROM confirmations c
+            JOIN operation_state o ON o.id = c.operation_id
+            WHERE c.status = 'pending'
+              AND c.requester_channel = ?1
+              AND c.requester_user_id = ?2
         "
         .to_owned();
         if code.is_some() {
             sql.push_str(" AND code_hash = ?3");
         }
-        sql.push_str(" ORDER BY created_at DESC, id DESC LIMIT 1");
+        sql.push_str(" ORDER BY c.created_at DESC, c.id DESC LIMIT 1");
 
         let channel = requester_channel_label(&requester.channel);
         match code {
             Some(code) => connection.query_row(&sql, (channel, &requester.user_id, code), |row| {
+                let commands_json = row.get::<_, String>(4)?;
                 Ok(PendingConfirmation {
                     confirmation_id: row.get(0)?,
                     operation_id: row.get(1)?,
                     action: row.get(2)?,
+                    summary: row.get(3)?,
+                    commands: serde_json::from_str(&commands_json).map_err(|err| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            4,
+                            rusqlite::types::Type::Text,
+                            Box::new(err),
+                        )
+                    })?,
                 })
             }),
             None => connection.query_row(&sql, (channel, &requester.user_id), |row| {
+                let commands_json = row.get::<_, String>(4)?;
                 Ok(PendingConfirmation {
                     confirmation_id: row.get(0)?,
                     operation_id: row.get(1)?,
                     action: row.get(2)?,
+                    summary: row.get(3)?,
+                    commands: serde_json::from_str(&commands_json).map_err(|err| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            4,
+                            rusqlite::types::Type::Text,
+                            Box::new(err),
+                        )
+                    })?,
                 })
             }),
         }
@@ -704,6 +824,8 @@ struct PendingConfirmation {
     confirmation_id: String,
     operation_id: String,
     action: String,
+    summary: String,
+    commands: Vec<CommandPreview>,
 }
 
 fn unix_epoch_seconds() -> u64 {
@@ -711,6 +833,25 @@ fn unix_epoch_seconds() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+fn ensure_state_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), DaemonError> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let names = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if !names.iter().any(|name| name == column) {
+        connection.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )?;
+    }
+    Ok(())
 }
 
 fn unix_epoch_nanos() -> u128 {

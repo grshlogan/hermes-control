@@ -4,7 +4,8 @@ Hermes Control is now a Rust workspace with Phase 1 and Phase 2 complete. Phase
 3 has authenticated read-only daemon API and SQLite state/audit foundations;
 Phase 4 has typed WSL/Hermes operation planning, dry-run previews,
 destructive-action confirmation records, confirm/cancel endpoints, and a pending
-operation lock.
+operation lock. Confirmed operations now flow through an injectable executor
+abstraction; the default executor is a no-op that does not run system commands.
 
 ## Phase Report
 
@@ -50,9 +51,11 @@ Phase 4 has started:
   events.
 - Pending confirmation records lock out a second mutating action until confirmed
   or cancelled.
-- `/v1/confirm` marks the pending confirmation and operation as confirmed.
+- `/v1/confirm` marks the pending confirmation, passes the stored operation to
+  an injected executor, and records the executor outcome.
 - `/v1/cancel` marks the pending confirmation and operation as cancelled.
-- Real process execution is still not implemented.
+- Real process execution is still not implemented; the default executor is
+  intentionally no-op.
 
 ## Current Runtime Observation
 
@@ -80,9 +83,10 @@ Latest pushed commits:
 Phase 4 remaining work should stay focused on safe execution after the typed
 planning layer:
 
-- Add a command executor abstraction with tests before any real WSL/Hermes
-  process execution.
-- Keep WSL/Hermes real execution behind typed builders, audit, and confirmation.
+- Add a real Windows command executor behind feature/explicit wiring after more
+  tests around failure handling and command allowlists.
+- Keep WSL/Hermes real execution behind typed builders, audit, confirmation, and
+  the operation lock.
 - Move CLI mutating commands to daemon API calls after executor behavior is
   covered.
 

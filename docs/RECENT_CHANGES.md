@@ -132,3 +132,19 @@ unimplemented ideas here.
 - Expanded Phase 4 daemon tests to cover lock rejection, confirmation release,
   and cancellation release.
 - Real WSL/Hermes process execution remains intentionally unimplemented.
+
+## 2026-05-02: Phase 4 injectable executor path added
+
+- Added `OperationExecutor`, `ExecutableOperation`, and `ExecutionOutcome` to
+  the daemon crate.
+- Added `build_router_with_executor()` so tests and future service wiring can
+  inject an executor implementation.
+- Confirmation now loads the stored pending operation, passes it to the injected
+  executor, and records the executor outcome in `operation_state`.
+- `operation_state` now stores operation summary and command preview JSON so
+  confirmed operations can be executed from persisted state.
+- Added a no-op default executor that completes operations without running
+  system commands.
+- Expanded Phase 4 daemon tests with a recording executor to verify confirm-time
+  dispatch and completed operation status.
+- Real WSL/Hermes process execution remains intentionally unwired.
