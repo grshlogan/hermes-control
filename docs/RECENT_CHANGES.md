@@ -184,3 +184,30 @@ unimplemented ideas here.
   unknown script names.
 - Added core and daemon Phase 4 tests covering Hermes restart dry-run previews,
   confirm-time command dispatch, and fixed-script allowlist behavior.
+
+## 2026-05-02: Phase 4 real WSL/Hermes E2E validation
+
+- Corrected `config/control.toml` to match this machine: WSL user `root` and
+  Hermes health URL `http://127.0.0.1:8642/health`.
+- Added immediate executor dispatch for non-confirming normal mutating actions
+  such as WSL/Hermes wake, including operation state and audit events.
+- Verified through a real daemon API smoke that WSL can stop, wake, and restart
+  while the Windows daemon stays alive.
+- Verified through daemon API that Hermes can restart, stop/kill, and wake; the
+  final restored state had WSL running and Hermes health returning HTTP 200.
+- Observed vLLM model endpoint `http://127.0.0.1:18080/v1/models` still
+  unavailable, which remains Phase 5 scope.
+- Observed Linux `service-status.sh` process checks can report false positives
+  because `pgrep -af` matches the probe command itself; health endpoint checks
+  were used as the reliable stop/start signal.
+
+## 2026-05-02: Phase 4 WSL root helper contract added
+
+- Switched the Phase 4 Hermes operation boundary from legacy `$HOME/Hermres`
+  scripts to product-owned WSL root helpers under `/opt/hermes-control/bin`.
+- Added `scripts/wsl-root/install.sh` plus start/stop/restart/kill/health/status
+  helpers and `/etc/hermes-control/runtime.env` defaults for fresh installs.
+- Tightened the Windows executor allowlist so Hermes helpers must run as WSL
+  `root` and match the canonical helper filenames.
+- Added tests covering canonical helper previews, allowlist acceptance, and WSL
+  install asset presence.

@@ -56,6 +56,11 @@ The intended final workspace will grow toward the layout described in
 - Secrets must be referenced by `*_ref` or environment/config indirection; never
   store raw provider keys, bearer tokens, or Telegram tokens in committed files.
 - Bind daemon APIs to `127.0.0.1` by default.
+- Hermes WSL process control runs as `root` by design. Production code must only
+  enter WSL root through product-owned helper scripts installed at
+  `/opt/hermes-control/bin`.
+- Legacy `/root/Hermres/*.sh` files are historical artifacts. Do not make them
+  daemon targets or allowlist entries.
 
 ## Rust Development Rules
 

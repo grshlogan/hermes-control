@@ -26,7 +26,7 @@ fn wsl_restart_plan_uses_fixed_wsl_commands_and_requires_confirmation() {
             "--distribution",
             "Ubuntu-Hermes-Codex",
             "--user",
-            "hermes",
+            "root",
             "--exec",
             "true"
         ]
@@ -51,9 +51,9 @@ fn wsl_shutdown_all_plan_is_destructive_and_fixed() {
 fn hermes_restart_plan_uses_fixed_wsl_scripts_and_health_check() {
     let controller = HermesRuntimeController::with_wsl(
         "E:\\WSL\\Hermres\\hermes-agent",
-        "http://127.0.0.1:18000/health",
+        "http://127.0.0.1:8642/health",
         "Ubuntu-Hermes-Codex",
-        "hermes",
+        "root",
     );
 
     let plan = controller.plan(HermesAction::Restart);
@@ -70,9 +70,9 @@ fn hermes_restart_plan_uses_fixed_wsl_scripts_and_health_check() {
             "--distribution",
             "Ubuntu-Hermes-Codex",
             "--user",
-            "hermes",
+            "root",
             "--exec",
-            "/home/hermes/Hermres/restart-services.sh"
+            "/opt/hermes-control/bin/hermes-control-restart.sh"
         ]
     );
     assert_eq!(plan.commands[1].program, "wsl.exe");
@@ -82,9 +82,9 @@ fn hermes_restart_plan_uses_fixed_wsl_scripts_and_health_check() {
             "--distribution",
             "Ubuntu-Hermes-Codex",
             "--user",
-            "hermes",
+            "root",
             "--exec",
-            "/home/hermes/Hermres/health-check.sh",
+            "/opt/hermes-control/bin/hermes-control-health.sh",
             "30",
             "ready"
         ]

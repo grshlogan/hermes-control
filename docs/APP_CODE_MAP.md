@@ -9,6 +9,8 @@ This map explains where to work in the Hermes Control Rust workspace.
   and Tauri boundary.
 - `Cargo.toml`: workspace members and shared dependency policy.
 - `config/control.toml`: daemon, WSL, Hermes health, log, and policy facts.
+  Current machine facts: WSL default user is `root`; Hermes health is
+  `http://127.0.0.1:8642/health`.
 - `config/providers.toml`: AI provider and route-source facts.
 - `config/model-runtimes.toml`: local vLLM runtime and variant facts.
 - `docs/`: handoff notes, boundary docs, and change log.
@@ -27,9 +29,10 @@ This map explains where to work in the Hermes Control Rust workspace.
   - Local read-only status collection.
   - WSL verbose-list parser and fixed `wsl.exe --list --verbose` command spec.
   - Phase 4 WSL/Hermes operation plan builders and dry-run command previews.
-  - Hermes WSL script previews for `start-services.sh`, `stop-services.sh`,
-    `restart-services.sh`, `kill-stuck-services.sh`, and
-    `health-check.sh 30 ready`.
+  - Hermes WSL root helper previews for `/opt/hermes-control/bin`
+    `hermes-control-start.sh`, `hermes-control-stop.sh`,
+    `hermes-control-restart.sh`, `hermes-control-kill.sh`, and
+    `hermes-control-health.sh 30 ready`.
   - HTTP endpoint checks and vLLM `/v1/models` parsing.
   - Local log-tail helper.
   - Future home for executor abstractions shared by daemon and tests.
@@ -45,12 +48,22 @@ This map explains where to work in the Hermes Control Rust workspace.
   - Confirmation/cancel endpoints and pending operation lock.
   - Confirm responses expose executor outcome status, while failed outcomes are
     stored in operation state and release the lock.
+  - Normal mutating actions that do not require confirmation execute
+    immediately through the injected executor and still create operation state
+    plus audit events.
   - Injectable `OperationExecutor`; `build_router()` defaults to no-op for safe
     library/test usage.
   - Daemon binary wires `WindowsCommandExecutor`, which executes only
     allowlisted WSL command-preview shapes after confirmation.
-  - Hermes destructive operations now reach the executor through fixed WSL
-    script previews; normal wake actions still need immediate execution wiring.
+  - Hermes destructive operations and wake operations now reach the executor
+    through fixed WSL script previews.
+
+- `scripts/wsl-root`
+  - Product-owned WSL root helper package.
+  - `install.sh` installs helpers to `/opt/hermes-control/bin` and creates
+    `/etc/hermes-control/runtime.env`.
+  - Helpers start, stop, restart, kill, health-check, and status-check the
+    Hermes gateway without relying on legacy `/root/Hermres/*.sh` scripts.
 
 - `crates/hermes-control-cli`
   - Clap command definitions and CLI rendering.
@@ -77,6 +90,8 @@ This map explains where to work in the Hermes Control Rust workspace.
 
 - `crates/hermes-control-core/tests/config_schema.rs`: config parse/validation
   contract.
+- `crates/hermes-control-core/tests/phase4_wsl_install_assets.rs`: WSL root
+  helper install asset contract.
 - `crates/hermes-control-core/tests/read_only_core.rs`: WSL parser, vLLM model
   parsing, log tailing, and status behavior.
 - `crates/hermes-control-cli/tests/help_contract.rs`: CLI help contract.
@@ -93,7 +108,8 @@ This map explains where to work in the Hermes Control Rust workspace.
   responses, confirmation records, audit preview events, confirm/cancel, and
   operation-lock release behavior, plus injected executor dispatch after
   confirmation, failed execution outcome reporting, Hermes fixed-script
-  previews, and Windows command allowlist enforcement.
+  previews, immediate execution for normal mutating actions, and Windows command
+  allowlist enforcement.
 
 ## Where To Make Changes
 

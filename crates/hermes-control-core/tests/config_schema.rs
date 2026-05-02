@@ -14,11 +14,11 @@ operation_timeout_seconds = 900
 
 [wsl]
 distro = "Ubuntu-Hermes-Codex"
-default_user = "hermes"
+default_user = "root"
 
 [hermes]
 agent_root = "E:\\WSL\\Hermres\\hermes-agent"
-health_url = "http://127.0.0.1:18000/health"
+health_url = "http://127.0.0.1:8642/health"
 logs = ["E:\\WSL\\Hermres\\hermes-agent\\logs"]
 
 [policy]
@@ -35,7 +35,7 @@ fn parses_control_config_schema_from_plan() {
     assert_eq!(config.daemon.bind, "127.0.0.1:18787");
     assert_eq!(config.daemon.api_token_ref, "hermes/control/api-token");
     assert_eq!(config.wsl.distro, "Ubuntu-Hermes-Codex");
-    assert_eq!(config.wsl.default_user, "hermes");
+    assert_eq!(config.wsl.default_user, "root");
     assert!(config.policy.require_confirm_for_destructive);
     assert!(!config.policy.allow_lan_bind);
     assert!(!config.policy.allow_raw_shell);

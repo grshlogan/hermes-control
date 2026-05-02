@@ -441,6 +441,20 @@ fn operation_response(
         });
     }
 
+    if state.store.has_active_operation().map_err(|err| {
+        tracing::warn!(error = %err, "failed to check operation lock");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })? {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    let operation = state
+        .store
+        .create_immediate_operation(&requester, &action, &plan)
+        .map_err(|err| {
+            tracing::warn!(error = %err, "failed to create immediate operation");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
     state
         .store
         .append_audit_event(&requester, &action, &plan)
@@ -448,10 +462,18 @@ fn operation_response(
             tracing::warn!(error = %err, "failed to append audit event");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
+    let outcome = state.executor.execute(&operation);
+    state
+        .store
+        .complete_operation(&operation, &outcome, &requester)
+        .map_err(|err| {
+            tracing::warn!(error = %err, "failed to complete immediate operation");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
     Ok(OperationResponse {
-        status: "planned".to_owned(),
+        status: outcome.status,
         risk: plan.risk,
-        summary: plan.summary,
+        summary: outcome.summary,
         dry_run: false,
         commands: plan.commands,
         confirmation_id: None,
@@ -707,6 +729,44 @@ impl DaemonStateStore {
             id,
             code_hint,
             expires_at,
+        })
+    }
+
+    fn create_immediate_operation(
+        &self,
+        requester: &Requester,
+        action: &str,
+        plan: &OperationPlan,
+    ) -> Result<ExecutableOperation, DaemonError> {
+        let operation_id = format!("op_{}", unix_epoch_nanos());
+        let commands_json = serde_json::to_string(&plan.commands)?;
+        let requester_channel = requester_channel_label(&requester.channel).to_owned();
+        let connection = Connection::open(&*self.state_db)?;
+        connection.execute(
+            "
+            INSERT INTO operation_state (
+                id, action, status, requester_channel, requester_user_id, summary, commands_json
+            )
+            VALUES (?1, ?2, 'running', ?3, ?4, ?5, ?6)
+            ",
+            (
+                &operation_id,
+                action,
+                &requester_channel,
+                &requester.user_id,
+                &plan.summary,
+                &commands_json,
+            ),
+        )?;
+
+        Ok(ExecutableOperation {
+            id: operation_id,
+            confirmation_id: String::new(),
+            action: action.to_owned(),
+            requester_channel,
+            requester_user_id: requester.user_id.clone(),
+            summary: plan.summary.clone(),
+            commands: plan.commands.clone(),
         })
     }
 
@@ -993,25 +1053,24 @@ fn is_allowlisted_wsl_exec_tail(user: &str, command_tail: &[String]) -> bool {
 }
 
 fn is_allowlisted_hermes_script(user: &str, script: &str, args: &[&str]) -> bool {
-    let home = if user == "root" {
-        "/root".to_owned()
-    } else {
-        format!("/home/{user}")
-    };
-    let Some(script_name) = script.strip_prefix(&format!("{home}/Hermres/")) else {
+    if user != "root" {
+        return false;
+    }
+
+    let Some(script_name) = script.strip_prefix("/opt/hermes-control/bin/") else {
         return false;
     };
 
     if args.is_empty() {
         matches!(
             script_name,
-            "start-services.sh"
-                | "stop-services.sh"
-                | "restart-services.sh"
-                | "kill-stuck-services.sh"
+            "hermes-control-start.sh"
+                | "hermes-control-stop.sh"
+                | "hermes-control-restart.sh"
+                | "hermes-control-kill.sh"
         )
     } else {
-        script_name == "health-check.sh" && args == ["30", "ready"]
+        script_name == "hermes-control-health.sh" && args == ["30", "ready"]
     }
 }
 

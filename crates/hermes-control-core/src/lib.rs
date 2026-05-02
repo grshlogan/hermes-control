@@ -158,7 +158,7 @@ impl WslController {
     pub fn new(distro: impl Into<String>) -> Self {
         Self {
             distro: distro.into(),
-            default_user: "hermes".to_owned(),
+            default_user: "root".to_owned(),
         }
     }
 
@@ -243,6 +243,13 @@ pub struct HermesRuntimeController {
     wsl_user: Option<String>,
 }
 
+const HERMES_CONTROL_WSL_BIN: &str = "/opt/hermes-control/bin";
+const HERMES_CONTROL_START_SCRIPT: &str = "hermes-control-start.sh";
+const HERMES_CONTROL_STOP_SCRIPT: &str = "hermes-control-stop.sh";
+const HERMES_CONTROL_RESTART_SCRIPT: &str = "hermes-control-restart.sh";
+const HERMES_CONTROL_KILL_SCRIPT: &str = "hermes-control-kill.sh";
+const HERMES_CONTROL_HEALTH_SCRIPT: &str = "hermes-control-health.sh";
+
 impl HermesRuntimeController {
     pub fn new(agent_root: impl Into<String>, health_url: impl Into<String>) -> Self {
         Self {
@@ -275,13 +282,14 @@ impl HermesRuntimeController {
                     "Wake Hermes runtime at {} and verify health at {}.",
                     self.agent_root, self.health_url
                 ),
-                commands: self.hermes_commands(&["start-services.sh", "health-check.sh"]),
+                commands: self
+                    .hermes_commands(&[HERMES_CONTROL_START_SCRIPT, HERMES_CONTROL_HEALTH_SCRIPT]),
                 requires_confirmation: false,
             },
             HermesAction::Stop => OperationPlan {
                 risk: RiskLevel::Destructive,
                 summary: format!("Stop Hermes runtime at {}.", self.agent_root),
-                commands: self.hermes_commands(&["stop-services.sh"]),
+                commands: self.hermes_commands(&[HERMES_CONTROL_STOP_SCRIPT]),
                 requires_confirmation: true,
             },
             HermesAction::Restart => OperationPlan {
@@ -290,7 +298,10 @@ impl HermesRuntimeController {
                     "Restart Hermes runtime at {} and verify health at {}.",
                     self.agent_root, self.health_url
                 ),
-                commands: self.hermes_commands(&["restart-services.sh", "health-check.sh"]),
+                commands: self.hermes_commands(&[
+                    HERMES_CONTROL_RESTART_SCRIPT,
+                    HERMES_CONTROL_HEALTH_SCRIPT,
+                ]),
                 requires_confirmation: true,
             },
             HermesAction::Kill => OperationPlan {
@@ -299,7 +310,7 @@ impl HermesRuntimeController {
                     "Kill Hermes runtime at {}. Daemon and last-known-good route stay outside the runtime.",
                     self.agent_root
                 ),
-                commands: self.hermes_commands(&["kill-stuck-services.sh"]),
+                commands: self.hermes_commands(&[HERMES_CONTROL_KILL_SCRIPT]),
                 requires_confirmation: true,
             },
         }
@@ -323,9 +334,9 @@ impl HermesRuntimeController {
             "--user".to_owned(),
             user.to_owned(),
             "--exec".to_owned(),
-            format!("{}/Hermres/{script}", wsl_home(user)),
+            format!("{HERMES_CONTROL_WSL_BIN}/{script}"),
         ];
-        if script == "health-check.sh" {
+        if script == HERMES_CONTROL_HEALTH_SCRIPT {
             args.extend(["30".to_owned(), "ready".to_owned()]);
         }
 
@@ -334,14 +345,6 @@ impl HermesRuntimeController {
             args,
         }
         .preview()
-    }
-}
-
-fn wsl_home(user: &str) -> String {
-    if user == "root" {
-        "/root".to_owned()
-    } else {
-        format!("/home/{user}")
     }
 }
 

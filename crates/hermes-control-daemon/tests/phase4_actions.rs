@@ -120,9 +120,9 @@ async fn hermes_restart_dry_run_returns_fixed_wsl_script_previews() {
             "--distribution",
             "Ubuntu-Hermes-Codex",
             "--user",
-            "hermes",
+            "root",
             "--exec",
-            "/home/hermes/Hermres/restart-services.sh"
+            "/opt/hermes-control/bin/hermes-control-restart.sh"
         ])
     );
     assert_eq!(
@@ -131,12 +131,47 @@ async fn hermes_restart_dry_run_returns_fixed_wsl_script_previews() {
             "--distribution",
             "Ubuntu-Hermes-Codex",
             "--user",
-            "hermes",
+            "root",
             "--exec",
-            "/home/hermes/Hermres/health-check.sh",
+            "/opt/hermes-control/bin/hermes-control-health.sh",
             "30",
             "ready"
         ])
+    );
+}
+
+#[tokio::test]
+async fn normal_mutating_action_executes_immediately_without_confirmation() {
+    let fixture = Fixture::new();
+    let executor = Arc::new(RecordingExecutor::default());
+    let router = build_router_with_executor(&fixture.config_dir, TOKEN, executor.clone())
+        .expect("router should build");
+
+    let response = post_json(
+        router,
+        "/v1/wsl/action",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase4-test"},
+            "action": "Wake",
+            "reason": "phase4 immediate execution test",
+            "dry_run": false
+        }),
+    )
+    .await;
+
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["risk"], "NormalMutating");
+    assert_eq!(response["summary"], "recorded by test executor");
+    assert!(response["confirmation_id"].is_null());
+
+    let operations = executor.operations.lock().expect("executor lock");
+    assert_eq!(operations.len(), 1);
+    assert_eq!(operations[0].action, "wsl::Wake");
+    assert_eq!(operations[0].commands.len(), 1);
+    assert_eq!(operations[0].commands[0].program, "wsl.exe");
+    assert_eq!(
+        operation_statuses(&fixture.state_db),
+        vec!["completed".to_owned()]
     );
 }
 
@@ -288,9 +323,9 @@ async fn confirm_executes_pending_operation_through_injected_executor() {
             "--distribution",
             "Ubuntu-Hermes-Codex",
             "--user",
-            "hermes",
+            "root",
             "--exec",
-            "/home/hermes/Hermres/restart-services.sh"
+            "/opt/hermes-control/bin/hermes-control-restart.sh"
         ]
     );
     assert_eq!(
@@ -483,9 +518,9 @@ fn windows_executor_allows_fixed_hermes_wsl_scripts() {
                     "--distribution",
                     "Ubuntu-Hermes-Codex",
                     "--user",
-                    "hermes",
+                    "root",
                     "--exec",
-                    "/home/hermes/Hermres/restart-services.sh",
+                    "/opt/hermes-control/bin/hermes-control-restart.sh",
                 ],
             ),
             command(
@@ -494,9 +529,9 @@ fn windows_executor_allows_fixed_hermes_wsl_scripts() {
                     "--distribution",
                     "Ubuntu-Hermes-Codex",
                     "--user",
-                    "hermes",
+                    "root",
                     "--exec",
-                    "/home/hermes/Hermres/health-check.sh",
+                    "/opt/hermes-control/bin/hermes-control-health.sh",
                     "30",
                     "ready",
                 ],
@@ -530,9 +565,9 @@ fn windows_executor_rejects_unknown_hermes_wsl_scripts() {
                 "--distribution",
                 "Ubuntu-Hermes-Codex",
                 "--user",
-                "hermes",
+                "root",
                 "--exec",
-                "/home/hermes/Hermres/delete-everything.sh",
+                "/opt/hermes-control/bin/delete-everything.sh",
             ],
         )],
     };
@@ -664,7 +699,7 @@ operation_timeout_seconds = 900
 
 [wsl]
 distro = "Ubuntu-Hermes-Codex"
-default_user = "hermes"
+default_user = "root"
 
 [hermes]
 agent_root = "E:\\WSL\\Hermres\\hermes-agent"

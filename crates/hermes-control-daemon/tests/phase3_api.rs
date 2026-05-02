@@ -124,7 +124,7 @@ operation_timeout_seconds = 900
 
 [wsl]
 distro = "Ubuntu-Hermes-Codex"
-default_user = "hermes"
+default_user = "root"
 
 [hermes]
 agent_root = "E:\\WSL\\Hermres\\hermes-agent"

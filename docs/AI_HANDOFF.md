@@ -62,26 +62,37 @@ Phase 4 has started:
   anything and currently allows only fixed WSL command shapes:
   `wsl.exe --shutdown`, `wsl.exe --terminate <safe-distro>`, and
   `wsl.exe --distribution <safe-distro> --user <safe-user> --exec true`.
-- Hermes restart/stop/kill plans now produce fixed WSL script previews under
-  the configured WSL user's `$HOME/Hermres`: `restart-services.sh`,
-  `stop-services.sh`, `kill-stuck-services.sh`, and `health-check.sh 30 ready`.
+- Hermes restart/stop/kill/wake plans now produce fixed WSL root helper previews
+  under `/opt/hermes-control/bin`: `hermes-control-restart.sh`,
+  `hermes-control-stop.sh`, `hermes-control-kill.sh`,
+  `hermes-control-start.sh`, and `hermes-control-health.sh 30 ready`.
 - Confirmed Hermes destructive operations can now flow to the Windows executor
-  through that fixed script allowlist. This requires the Linux-side helper
-  scripts to exist for the configured WSL user.
+  through that fixed helper allowlist. This requires installing the WSL root
+  helper package from `scripts/wsl-root/install.sh`.
+- Non-confirming normal mutating actions such as WSL/Hermes wake now execute
+  immediately through the injected executor, create `operation_state`, append
+  audit events, and return executor status.
 - The daemon binary uses `WindowsCommandExecutor`; tests use fake or no-op
   executors.
 - Failed executor outcomes are stored as `failed` operation state and release
   the pending operation lock for a later retry.
-- Non-confirming wake actions still need an immediate execution path; today they
-  return a typed plan rather than running directly.
 
 ## Current Runtime Observation
 
-The last CLI smoke check observed:
+The last real Phase 4 E2E smoke observed on May 2, 2026:
 
-- WSL distro `Ubuntu-Hermes-Codex` was running as WSL2.
-- Hermes health at `http://127.0.0.1:18000/health` was unavailable.
-- Configured vLLM model endpoints were not ready.
+- WSL distro `Ubuntu-Hermes-Codex` could be stopped, woken, and restarted by
+  daemon API while the Windows daemon stayed alive.
+- Hermes restart, stop, kill, and wake all completed through daemon API.
+- Final restored state was WSL `Running` and Hermes health
+  `http://127.0.0.1:8642/health` returning HTTP 200.
+- Config was corrected to `wsl.default_user = "root"` because the distro has no
+  `hermes` Linux user and Hermes process control is a WSL root boundary.
+- New product-owned helpers should be installed to `/opt/hermes-control/bin`;
+  observed legacy files under `/root/Hermres` are not daemon targets anymore.
+- Config was corrected to Hermes health URL `http://127.0.0.1:8642/health`.
+- Configured vLLM model endpoints at `http://127.0.0.1:18080/v1/models` were
+  not ready.
 - Overall status was `Degraded`.
 
 Treat this as a snapshot, not a permanent fact; rerun CLI status before making
@@ -91,24 +102,24 @@ runtime claims.
 
 Latest pushed commits:
 
+- `c95855c feat: add Hermes fixed-script execution boundary`
 - `44a6eaa feat: expose execution status on confirm`
 - `660a210 feat: wire allowlisted Windows executor`
 - `87ac3dc feat: add injectable operation executor`
 - `c865ed5 feat: add confirmation lifecycle and operation lock`
-- `3e4f2f1 feat: add phase4 typed operation previews`
 
 ## Current Phase
 
 Phase 4 remaining work should stay focused on safe execution after the typed
 planning layer:
 
-- Extend real execution beyond the current WSL allowlist only through typed
-  builders and focused tests.
-- Add immediate execution/state handling for normal mutating wake actions.
-- Keep any further WSL/Hermes real execution behind typed builders, audit,
-  confirmation when required, and the operation lock.
+- Commit the current WSL root helper contract after explicit user approval.
+- The helper-script false-positive issue is addressed by product-owned helpers
+  that use `/proc` PID scanning plus HTTP readiness instead of legacy
+  `service-status.sh` probes.
 - Move CLI mutating commands to daemon API calls after executor behavior is
   covered.
+- Keep Phase 5 vLLM runtime work out of Phase 4.
 
 ## Useful Commands
 
@@ -118,6 +129,13 @@ cargo fmt --all -- --check
 cargo test --workspace
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Install or refresh WSL root helpers:
+
+```powershell
+wsl.exe -d Ubuntu-Hermes-Codex -u root --exec bash -lc "cd /mnt/e/WSL/Hermres/hermes-control && bash scripts/wsl-root/install.sh"
+wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-status.sh
 ```
 
 Read-only CLI smoke:

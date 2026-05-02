@@ -30,6 +30,9 @@ Current v1 plan direction:
 - Telegram bot, Windows GUI, and CLI call the same Rust control daemon.
 - Bot/GUI must not directly execute arbitrary shell.
 - vLLM workspace should become a managed local model runtime.
+- Hermes process control is a WSL root boundary. New code must call
+  product-owned helpers installed under `/opt/hermes-control/bin`, not inherited
+  `.sh` files under `/root/Hermres`.
 
 V2 keeps these principles but changes the migration posture from “compatibility-first” to **clean rebuild with legacy as read-only behavior reference**.
 
@@ -103,8 +106,10 @@ If forced to choose a single visible product direction, choose **advanced beauti
    - CLI, Telegram bot, and GUI call daemon APIs.
 
 2. **No arbitrary shell**
-   - There is no endpoint like `run_command` or `exec`.
-   - Every operation is a Rust enum and maps to a fixed command builder.
+    - There is no endpoint like `run_command` or `exec`.
+    - Every operation is a Rust enum and maps to a fixed command builder.
+    - WSL root execution is allowed only through fixed Hermes Control helper
+      scripts installed at `/opt/hermes-control/bin`.
 
 3. **Windows daemon survives WSL failure**
    - Bot and GUI stay alive when WSL is stopped, broken, or restarting.
@@ -155,6 +160,8 @@ E:\WSL\Hermres\
       daemon\
       bot\
       gui\
+    scripts\
+      wsl-root\                         # product-owned WSL root helper package
     docs\
       architecture.md
       api.md
@@ -314,11 +321,11 @@ operation_timeout_seconds = 900
 
 [wsl]
 distro = "Ubuntu-Hermes-Codex"
-default_user = "hermes"
+default_user = "root"
 
 [hermes]
 agent_root = "E:\\WSL\\Hermres\\hermes-agent"
-health_url = "http://127.0.0.1:18000/health"
+health_url = "http://127.0.0.1:8642/health"
 logs = ["E:\\WSL\\Hermres\\hermes-agent\\logs"]
 
 [policy]
@@ -495,7 +502,7 @@ WslOperation::ListVerbose
   -> wsl.exe --list --verbose
 
 WslOperation::RunHermesHelper(Health)
-  -> wsl.exe --distribution Ubuntu-Hermes-Codex --user hermes -- /opt/hermes-control/bin/health.sh
+  -> wsl.exe --distribution Ubuntu-Hermes-Codex --user root --exec /opt/hermes-control/bin/hermes-control-health.sh 30 ready
 
 WslOperation::TerminateDistro
   -> wsl.exe --terminate Ubuntu-Hermes-Codex
@@ -932,6 +939,8 @@ Completion signal:
 Goal:
 
 - Replace old ops scripts with Rust command builders.
+- Replace inherited WSL `.sh` files with product-owned WSL root helpers that
+  have an open-source fresh-install path.
 
 Codex tasks:
 
@@ -939,6 +948,10 @@ Codex tasks:
 - Implement `HermesRuntimeController`.
 - Add wake/stop/restart/kill with confirmation policy.
 - Add dry-run summaries.
+- Add `scripts/wsl-root/install.sh` and canonical root helpers under
+  `/opt/hermes-control/bin`.
+- Document the WSL root integration and runtime config under
+  `/etc/hermes-control/runtime.env`.
 
 Completion signal:
 
