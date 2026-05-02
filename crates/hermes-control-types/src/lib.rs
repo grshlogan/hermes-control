@@ -302,6 +302,8 @@ pub struct ReadOnlyStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActiveRouteStatus {
     pub active_profile_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_known_good_profile_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -329,6 +331,8 @@ pub struct OperationResponse {
     pub dry_run: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub commands: Vec<CommandPreview>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confirmation_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

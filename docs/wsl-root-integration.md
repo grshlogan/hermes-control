@@ -33,6 +33,7 @@ The daemon may also execute these vLLM helper shapes:
 
 ```text
 wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-vllm-start.sh <variant-id>
+wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-vllm-start-with-fallback.sh <primary-variant-id> <fallback-variant-id>
 wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-vllm-stop.sh <served-model-name>
 wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-vllm-health.sh <served-model-name> <seconds> ready
 wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-vllm-logs.sh <variant-id> <line-count>
@@ -57,6 +58,7 @@ scripts/wsl-root/
     hermes-control-health.sh
     hermes-control-status.sh
     hermes-control-vllm-start.sh
+    hermes-control-vllm-start-with-fallback.sh
     hermes-control-vllm-stop.sh
     hermes-control-vllm-health.sh
     hermes-control-vllm-logs.sh
@@ -154,9 +156,14 @@ wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-con
 Start and verify the MTP model:
 
 ```powershell
-wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-vllm-start.sh qwen36-mtp
+wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-vllm-start-with-fallback.sh qwen36-mtp qwen36-awq-int4
 wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-vllm-health.sh qwen36-mtp 600 ready
 ```
 
 The health JSON includes the resolved `models_endpoint`. Use that endpoint for
 Hermes local-provider configuration on the same WSL distro.
+
+The fallback helper first tries the primary variant. If it exits early or does
+not become ready before `VLLM_FALLBACK_PRIMARY_TIMEOUT_SECONDS`, it stops the
+primary served model and starts the fallback variant, waiting up to
+`VLLM_FALLBACK_SECONDARY_TIMEOUT_SECONDS`. Both defaults are 180 seconds.

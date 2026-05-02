@@ -30,6 +30,9 @@ This map explains where to work in the Hermes Control Rust workspace.
     client/daemon contracts.
   - `ConfirmationLifecycleResponse.execution_status` reports confirmed
     operation execution outcome when confirmation also triggers execution.
+  - `OperationResponse.output` carries optional captured helper stdout for
+    read-only operator output such as model logs.
+  - `ActiveRouteStatus` carries active and last-known-good route profile IDs.
   - Change this first when a JSON/TOML/API shape changes.
 
 - `crates/hermes-control-core`
@@ -39,6 +42,9 @@ This map explains where to work in the Hermes Control Rust workspace.
   - Phase 4 WSL/Hermes operation plan builders and dry-run command previews.
   - Phase 5 vLLM model runtime operation planner for canonical
     `/opt/hermes-control/bin/hermes-control-vllm-*.sh` helpers.
+  - MTP model start/restart planning can use the canonical
+    `hermes-control-vllm-start-with-fallback.sh` helper when a stable fallback
+    variant exists in the same runtime.
   - Hermes WSL root helper previews for `/opt/hermes-control/bin`
     `hermes-control-start.sh`, `hermes-control-stop.sh`,
     `hermes-control-restart.sh`, `hermes-control-kill.sh`, and
@@ -58,6 +64,9 @@ This map explains where to work in the Hermes Control Rust workspace.
   - Initial model action route:
     `/v1/models/{model_id}/action` for typed vLLM start/stop/restart/health/logs
     /benchmark plans.
+  - Phase 6 route switch route: `/v1/route/switch` validates provider IDs,
+    stores active/last-known-good route state, audits the switch, and gates
+    local vLLM profiles on readiness.
   - Confirmation/cancel endpoints and pending operation lock.
   - Confirm responses expose executor outcome status, while failed outcomes are
     stored in operation state and release the lock.
@@ -68,6 +77,8 @@ This map explains where to work in the Hermes Control Rust workspace.
     library/test usage.
   - Daemon binary wires `WindowsCommandExecutor`, which executes only
     allowlisted WSL command-preview shapes after confirmation.
+  - `WindowsCommandExecutor` captures successful command stdout and exposes it
+    through `OperationResponse.output`.
   - Hermes destructive operations and wake operations now reach the executor
     through fixed WSL script previews.
 
@@ -78,8 +89,9 @@ This map explains where to work in the Hermes Control Rust workspace.
   - Helpers start, stop, restart, kill, health-check, and status-check the
     Hermes gateway without relying on legacy `/root/Hermres/*.sh` scripts.
   - vLLM helpers start/stop/health/log/benchmark fixed model runtime operations
-    through the same root-side package. Benchmark is a reserved helper in this
-    first Phase 5 increment.
+    through the same root-side package. Benchmark is a reserved helper.
+  - `hermes-control-vllm-start-with-fallback.sh` tries a primary MTP variant and
+    falls back to a stable AWQ variant if the primary does not become healthy.
   - `hermes-control-vllm-bootstrap.sh` runs the project-owned vLLM bootstrap
     script for daemon-triggered install/repair.
   - `install.sh` refreshes `VLLM_*` defaults in `/etc/hermes-control/runtime.env`
@@ -100,8 +112,10 @@ This map explains where to work in the Hermes Control Rust workspace.
   - Phase 4 mutating commands call daemon APIs with bearer auth:
     `hermes <wake|stop|restart|kill>`,
     `wsl <wake|stop|restart|shutdown-all>`, `confirm <code>`, and `cancel`.
-  - Phase 5 `model <install|start|stop|restart|health|benchmark>` commands call
-    daemon model action APIs.
+  - Phase 5 `model <install|start|stop|restart|health|logs|benchmark>` commands
+    call daemon model action APIs.
+  - Phase 6 `route active` reads daemon route state and
+    `route switch <profile-id>` posts typed route switch requests.
 
 - `crates/hermes-control-bot`
   - Windows-hosted Teloxide subprocess.
@@ -138,7 +152,7 @@ This map explains where to work in the Hermes Control Rust workspace.
 - `crates/hermes-control-cli/tests/read_only_commands.rs`: read-only CLI
   rendering behavior.
 - `crates/hermes-control-cli/tests/daemon_commands.rs`: CLI mutating daemon API
-  request contract.
+  request contract, including model logs and route switch.
 - `crates/hermes-control-bot/tests/bot_boundary.rs`: bot allowlist, command
   mapping, and no raw subprocess boundary.
 - `crates/hermes-control-daemon/tests/phase3_api.rs`: daemon bearer auth,
@@ -151,7 +165,9 @@ This map explains where to work in the Hermes Control Rust workspace.
   operation-lock release behavior, plus injected executor dispatch after
   confirmation, failed execution outcome reporting, Hermes fixed-script
   previews, initial vLLM action previews, immediate execution for normal
-  mutating actions, and Windows command allowlist enforcement.
+  mutating actions, Windows command allowlist enforcement, and stdout capture.
+- `crates/hermes-control-daemon/tests/phase6_route_switch.rs`: Phase 6 route
+  switch state, last-known-good tracking, audit, and local vLLM readiness gate.
 
 ## Where To Make Changes
 

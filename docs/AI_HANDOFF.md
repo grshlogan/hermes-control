@@ -4,10 +4,11 @@ Hermes Control is now a Rust workspace with Phase 1 and Phase 2 complete. Phase
 3 has authenticated read-only daemon API and SQLite state/audit foundations;
 Phase 4 has typed WSL/Hermes operation planning, dry-run previews,
 destructive-action confirmation records, confirm/cancel endpoints, and a pending
-operation lock. Confirmed operations now flow through an injectable executor
-abstraction. The daemon binary wires an allowlisted Windows command executor for
-confirmed operations; library/test router defaults can still use no-op or fake
-executors. Phase 5 has started with initial vLLM runtime action planning.
+operation lock. Confirmed operations flow through an injectable executor
+abstraction. Phase 5 basic vLLM runtime control is now closed out, including
+project-owned vLLM provisioning, live qwen36 MTP validation, daemon-backed
+`model logs`, and AWQ fallback start planning. Phase 6 has started with a
+state-only route switch skeleton.
 
 ## Phase Report
 
@@ -77,47 +78,63 @@ Phase 4 is complete:
 - Failed executor outcomes are stored as `failed` operation state and release
   the pending operation lock for a later retry.
 
-Phase 5 has started:
+Phase 5 basic closeout is complete:
 
 - `ModelRuntimeController` builds typed vLLM operation plans from
   `config/model-runtimes.toml`.
-- Model `Start` emits canonical WSL root helper commands for
-  `hermes-control-vllm-start.sh <variant>` plus
-  `hermes-control-vllm-health.sh <served-model> 180 ready`.
+- Model `Start` for MTP variants emits the canonical
+  `hermes-control-vllm-start-with-fallback.sh <primary> <fallback>` helper when
+  a stable same-runtime fallback exists.
 - Model `Stop` and `Restart` require confirmation; `Benchmark` is marked
   experimental and reserved for a later Phase 5 increment.
 - Model `Install` runs the project-owned vLLM bootstrap helper through the same
   daemon/WSL root execution boundary.
 - Daemon route `/v1/models/{model_id}/action` accepts typed `ModelAction`
   requests and reuses the same confirmation/audit/executor pipeline.
-- CLI `model <start|stop|restart|health|benchmark>` posts typed daemon model
-  actions.
+- CLI `model <install|start|stop|restart|health|logs|benchmark>` posts typed
+  daemon model actions.
+- Daemon executor stdout can now flow through optional `OperationResponse.output`
+  so `model logs` renders helper log tails.
 - WSL root helper package now includes vLLM start/stop/health/logs/benchmark
-  scripts and appends `VLLM_*` defaults into existing runtime env files.
+  scripts, a bootstrap helper, and a start-with-fallback helper.
 - The software-owned vLLM runtime boundary is now
   `E:\WSL\Hermres\hermes-control\vLLM`; `E:\WSL\vLLM\models` is only the
   external model-weight store.
 - Project runtime scripts now exist under `vLLM/scripts/` for environment setup,
   bootstrap/repair install, OpenAI-compatible serving, qwen36 MTP, and qwen36
   AWQ INT4 eager startup.
+- Live qwen36 MTP, Hermes gateway, and Open WebUI calls were verified on
+  2026-05-03.
+
+Phase 6 has started:
+
+- `POST /v1/route/switch` validates provider profile IDs, supports dry-run,
+  persists active route state, records last-known-good route, and writes audit
+  records.
+- `GET /v1/route/active` now returns both `active_profile_id` and
+  `last_known_good_profile_id`.
+- CLI `route active` reads daemon route state; CLI
+  `route switch <profile-id>` posts a typed `RouteSwitchRequest`.
+- Local vLLM route switches are blocked unless the configured served model is
+  ready.
+- Hermes/Open WebUI config patching, Hermes reload/restart, and rollback after
+  failed reload are still pending Phase 6 work.
 
 ## Current Runtime Observation
 
-The last real Phase 4 E2E smoke observed on May 2, 2026:
+The last real runtime smoke observed on May 3, 2026:
 
-- WSL distro `Ubuntu-Hermes-Codex` could be stopped, woken, and restarted by
-  daemon API while the Windows daemon stayed alive.
-- Hermes restart, stop, kill, and wake all completed through daemon API.
-- Final restored state was WSL `Running` and Hermes health
-  `http://127.0.0.1:8642/health` returning HTTP 200.
 - Config was corrected to `wsl.default_user = "root"` because the distro has no
   `hermes` Linux user and Hermes process control is a WSL root boundary.
 - New product-owned helpers should be installed to `/opt/hermes-control/bin`;
   observed legacy files under `/root/Hermres` are not daemon targets anymore.
 - Config was corrected to Hermes health URL `http://127.0.0.1:8642/health`.
-- Configured vLLM model endpoints at `http://127.0.0.1:18080/v1/models` were
-  not ready.
-- Overall status was `Degraded`.
+- qwen36 MTP started from `E:\WSL\Hermres\hermes-control\vLLM` and returned
+  `OK` through `/v1/chat/completions`.
+- The working vLLM endpoint was the WSL primary IP during that smoke:
+  `http://10.2.176.55:18080/v1`. Treat this as a snapshot.
+- Hermes `custom:vllm` and Open WebUI's Hermes-backed route both returned `OK`
+  through the local model.
 
 Treat this as a snapshot, not a permanent fact; rerun CLI status before making
 runtime claims.
@@ -126,43 +143,23 @@ runtime claims.
 
 Latest pushed commits:
 
+- `48d1b37 feat: add Phase 5 vLLM provisioning flow`
 - `99dac2a feat: start Phase 5 vLLM runtime actions`
 - `869971c feat: close out Phase 4 daemon CLI actions`
 - `90a5a99 feat: add WSL root helper integration`
 - `c95855c feat: add Hermes fixed-script execution boundary`
-- `44a6eaa feat: expose execution status on confirm`
 
 ## Current Phase
 
-Phase 5 is in progress. Current local unpushed work:
+Phase 6 has started. Current local unpushed work:
 
-- Project-owned vLLM runtime scaffold under
-  `E:\WSL\Hermres\hermes-control\vLLM`.
-- `config/model-runtimes.toml` points qwen36 AWQ and MTP start scripts and logs
-  at that project runtime.
-- WSL root installer/common defaults migrate `VLLM_*` runtime paths away from
-  the old shared `E:\WSL\vLLM` workspace while preserving
-  `E:\WSL\vLLM\models` as the model-weight store.
-- `vLLM/scripts/bootstrap.sh` can create or repair the project venv with
-  direct-first/fallback-proxy dependency installation. vLLM socket/temp files
-  default to WSL `/tmp` for DrvFS compatibility; pip cache falls back there when
-  DrvFS ownership makes pip disable the project cache.
-- CLI `model install <model-id>` posts `ModelAction::Install`; dry-run previews
-  are available before running the bootstrap.
-- Telegram `/model install <model-id>` maps to the same daemon action.
-- The bootstrap helper was run successfully on this machine and installed vLLM
-  0.20.0 plus Torch 2.11.0 into
-  `E:\WSL\Hermres\hermes-control\vLLM\.venv`.
-- `qwen36-mtp` has been started from the project-owned vLLM runtime and verified
-  live. The working endpoint on this WSL distro is the WSL primary IP
-  (`http://10.2.176.55:18080/v1` during the 2026-05-03 smoke), not loopback.
-- `hermes-control-vllm-health.sh qwen36-mtp 5 ready` now returns ready after
-  fixing the `/v1/models` body parser and runtime endpoint resolution.
-- Hermes `custom:vllm` and Open WebUI were both verified against the local MTP
-  model through real chat completion calls that returned `OK`.
-- Next Phase 5 increment should persist runtime readiness/state, reduce noisy
-  vLLM environment warnings, and make the local route switch reproducible
-  without hand-editing Hermes/Open WebUI config.
+- `OperationResponse.output` and daemon stdout capture for log-style helpers.
+- CLI `model logs <model-id>` daemon action support.
+- WSL root `hermes-control-vllm-start-with-fallback.sh`.
+- MTP start/restart plan fallback to stable AWQ variant.
+- Daemon route switch endpoint and CLI route switch command.
+- Route state stores active and last-known-good profile IDs.
+- Local vLLM route readiness gate.
 
 ## Useful Commands
 
@@ -207,13 +204,24 @@ Phase 5 model dry-run smoke:
 $env:HERMES_CONTROL_API_TOKEN = "phase5-token"
 cargo run -p hermes-control-daemon
 cargo run -p hermes-control-cli -- --api-token phase5-token model start qwen36-mtp --dry-run --reason "smoke"
+cargo run -p hermes-control-cli -- --api-token phase5-token model logs qwen36-mtp --reason "smoke"
 wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-vllm-health.sh qwen36-mtp 1 ready
+```
+
+Phase 6 route smoke:
+
+```powershell
+$env:HERMES_CONTROL_API_TOKEN = "phase6-token"
+cargo run -p hermes-control-daemon
+cargo run -p hermes-control-cli -- --api-token phase6-token route active
+cargo run -p hermes-control-cli -- --api-token phase6-token route switch external.openai-compatible --dry-run --reason "smoke"
 ```
 
 ## Handoff Notes
 
 - Keep `docs/RECENT_CHANGES.md` updated after each landed conversation-level
   change.
-- Phase 5 should stay focused on vLLM runtime control before route switching.
+- Phase 6 should next implement Hermes provider config patch/reload and rollback
+  around the already-persisted route state.
 - Tauri belongs in Phase 8 as a GUI shell and typed daemon client only.
 - Ask for explicit approval before commit and push.

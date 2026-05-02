@@ -2,7 +2,7 @@
 
 Hermes Control 是一个面向 Windows + WSL2 的本地 AI 控制器。它的目标不是再做一个聊天客户端，而是接管本地 Hermes 运行栈的关键控制面：WSL2 生命周期、Hermes 进程、vLLM 本地模型运行时、Open WebUI 接入、路由切换、日志、健康检查和安全确认。
 
-当前项目处于 Phase 5 开发中：Rust 控制核心、CLI、daemon、bot 边界、WSL root helper、项目内 vLLM 运行时和 qwen36 MTP 实测链路已经建立；GUI 和完整安装向导还在后续阶段。
+当前项目已完成 Phase 5 基础收尾，并开始 Phase 6：Rust 控制核心、CLI、daemon、bot 边界、WSL root helper、项目内 vLLM 运行时和 qwen36 MTP 实测链路已经建立；route switcher 已有状态切换骨架；GUI 和完整安装向导还在后续阶段。
 
 ## 当前能力
 
@@ -18,16 +18,18 @@ Hermes Control 是一个面向 Windows + WSL2 的本地 AI 控制器。它的目
 - 外部模型权重目录：
   `E:\WSL\vLLM\models`
 - vLLM bootstrap / start / stop / health / logs helper。
+- MTP 启动失败时回退到 AWQ 稳定 profile 的 root helper 边界。
 - `qwen36-mtp` MTP 模型实测启动和调用。
 - Hermes gateway 调用本地模型实测。
 - Open WebUI 经 Hermes gateway 调用本地模型实测。
+- daemon/CLI 级 route active 与 route switch 状态骨架。
 
 仍在规划或后续阶段：
 
 - 完整 GUI。
 - 一键 Fresh Install 向导。
 - Hermes/Open WebUI 接入自动化。
-- Provider route switcher。
+- Hermes/Open WebUI route switcher 的配置补丁、热重载和回滚。
 - benchmark 持久化和 GUI 展示。
 - Windows service/installer。
 
@@ -117,7 +119,7 @@ wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-con
 启动 MTP 模型：
 
 ```powershell
-wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-vllm-start.sh qwen36-mtp
+wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-vllm-start-with-fallback.sh qwen36-mtp qwen36-awq-int4
 ```
 
 等待 ready：
@@ -159,6 +161,17 @@ Open WebUI:     http://127.0.0.1:3000
 ```text
 plan_wsl2_hermes_provisioning.md
 ```
+
+## Route Switch
+
+当前 Phase 6 已经具备状态层 route switch：
+
+```powershell
+cargo run -p hermes-control-cli -- --api-token <token> route active
+cargo run -p hermes-control-cli -- --api-token <token> route switch external.openai-compatible --dry-run --reason "smoke"
+```
+
+这一步会验证 provider、维护 active route 和 last-known-good route，并在切到 local vLLM profile 时检查模型 ready。它暂时还不会自动改 Hermes/Open WebUI 配置；这正是 Phase 6 下一步。
 
 ## 文档入口
 

@@ -303,3 +303,19 @@ unimplemented ideas here.
   workflow.
 - Added a cross-reference from the main Rust rewrite plan to the new
   provisioning plan.
+
+## 2026-05-03: Phase 5 closeout and Phase 6 route switch start
+
+- Changed CLI `model logs <model-id>` from placeholder text to a typed daemon
+  `ModelAction::Logs` request, with helper stdout rendered back to the operator.
+- Added optional `OperationResponse.output` and daemon executor stdout capture
+  so read-only helper output can flow through daemon clients.
+- Added canonical WSL root helper
+  `hermes-control-vllm-start-with-fallback.sh <primary> <fallback>`.
+- Updated MTP start/restart plans to use the fallback helper when a stable
+  same-runtime fallback variant such as `qwen36-awq-int4` exists.
+- Started Phase 6 with daemon `POST /v1/route/switch`, active route persistence,
+  last-known-good route tracking, audit records, CLI `route switch`, and local
+  vLLM readiness gating.
+- Route switching is currently state-only; Hermes/Open WebUI config patching,
+  hot reload/restart, and rollback remain later Phase 6 work.

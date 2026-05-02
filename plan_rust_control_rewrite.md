@@ -1090,14 +1090,19 @@ Current status as of 2026-05-03:
   loopback despite a visible listen socket.
 - Hermes `custom:vllm` and Open WebUI's Hermes-backed OpenAI route were both
   verified with real chat completion calls returning `OK`.
+- Phase 5 basic closeout is complete: `model logs` now goes through the daemon
+  model action path and renders captured helper output; MTP start plans use a
+  canonical AWQ fallback helper when a stable same-runtime fallback exists.
+- Remaining route reproducibility work moves to Phase 6 because it must change
+  active provider state and eventually patch/reload Hermes/Open WebUI config.
 
 Completion signal:
 
 - `hermes-control model start qwen36-mtp` reaches ready state.
 - `hermes-control model logs qwen36-mtp` works.
-- Hermes and Open WebUI can route through the local MTP model without manual
-  one-off config edits.
 - failed MTP start can fall back to AWQ profile.
+- Hermes and Open WebUI can route through the local MTP model in live smoke.
+- Automatic Hermes/Open WebUI route config edits are deferred to Phase 6.
 
 ### Phase 6 — Route Switcher
 
@@ -1113,6 +1118,19 @@ Codex tasks:
 - Implement switch to external API.
 - Implement switch to Claude/DeepSeek/Codex profiles.
 - Implement switch to local vLLM profile with model readiness gate.
+
+Current status as of 2026-05-03:
+
+- Phase 6 has started with a state-only route switch skeleton.
+- Daemon `POST /v1/route/switch` validates the requested provider profile,
+  supports dry-run, persists `active_profile_id`, records
+  `last_known_good_profile_id`, and writes audit/operation records.
+- CLI `hermes-control route active` now reads daemon route state and
+  `hermes-control route switch <profile-id>` posts typed `RouteSwitchRequest`.
+- Local vLLM profiles are gated on model readiness before the active route state
+  can switch to them.
+- This increment does not yet patch Hermes provider env/config, hot-reload
+  Hermes, update Open WebUI, or perform rollback after a failed Hermes reload.
 
 Completion signal:
 

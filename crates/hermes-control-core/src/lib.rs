@@ -250,6 +250,8 @@ const HERMES_CONTROL_RESTART_SCRIPT: &str = "hermes-control-restart.sh";
 const HERMES_CONTROL_KILL_SCRIPT: &str = "hermes-control-kill.sh";
 const HERMES_CONTROL_HEALTH_SCRIPT: &str = "hermes-control-health.sh";
 const HERMES_CONTROL_VLLM_START_SCRIPT: &str = "hermes-control-vllm-start.sh";
+const HERMES_CONTROL_VLLM_START_WITH_FALLBACK_SCRIPT: &str =
+    "hermes-control-vllm-start-with-fallback.sh";
 const HERMES_CONTROL_VLLM_STOP_SCRIPT: &str = "hermes-control-vllm-stop.sh";
 const HERMES_CONTROL_VLLM_HEALTH_SCRIPT: &str = "hermes-control-vllm-health.sh";
 const HERMES_CONTROL_VLLM_LOGS_SCRIPT: &str = "hermes-control-vllm-logs.sh";
@@ -387,26 +389,7 @@ impl<'a> ModelRuntimeController<'a> {
                 )],
                 requires_confirmation: false,
             },
-            ModelAction::Start => OperationPlan {
-                risk: RiskLevel::NormalMutating,
-                summary: format!(
-                    "Start vLLM model {variant_id} on {} and wait for {} at {}.",
-                    runtime.wsl_distro, served_model_name, runtime.models_endpoint
-                ),
-                commands: vec![
-                    self.vllm_command(
-                        &runtime.wsl_distro,
-                        HERMES_CONTROL_VLLM_START_SCRIPT,
-                        &[variant_id],
-                    ),
-                    self.vllm_command(
-                        &runtime.wsl_distro,
-                        HERMES_CONTROL_VLLM_HEALTH_SCRIPT,
-                        &[served_model_name, "180", "ready"],
-                    ),
-                ],
-                requires_confirmation: false,
-            },
+            ModelAction::Start => self.start_plan(runtime, variant),
             ModelAction::Stop => OperationPlan {
                 risk: RiskLevel::Destructive,
                 summary: format!("Stop vLLM model {served_model_name}."),
@@ -417,31 +400,7 @@ impl<'a> ModelRuntimeController<'a> {
                 )],
                 requires_confirmation: true,
             },
-            ModelAction::Restart => OperationPlan {
-                risk: RiskLevel::Destructive,
-                summary: format!(
-                    "Restart vLLM model {variant_id} and wait for {served_model_name} at {}.",
-                    runtime.models_endpoint
-                ),
-                commands: vec![
-                    self.vllm_command(
-                        &runtime.wsl_distro,
-                        HERMES_CONTROL_VLLM_STOP_SCRIPT,
-                        &[served_model_name],
-                    ),
-                    self.vllm_command(
-                        &runtime.wsl_distro,
-                        HERMES_CONTROL_VLLM_START_SCRIPT,
-                        &[variant_id],
-                    ),
-                    self.vllm_command(
-                        &runtime.wsl_distro,
-                        HERMES_CONTROL_VLLM_HEALTH_SCRIPT,
-                        &[served_model_name, "180", "ready"],
-                    ),
-                ],
-                requires_confirmation: true,
-            },
+            ModelAction::Restart => self.restart_plan(runtime, variant),
             ModelAction::Health => OperationPlan {
                 risk: RiskLevel::ReadOnly,
                 summary: format!("Check vLLM model {served_model_name} readiness."),
@@ -504,6 +463,110 @@ impl<'a> ModelRuntimeController<'a> {
             .or(served_match)
     }
 
+    fn start_plan(
+        &self,
+        runtime: &'a ModelRuntimeConfig,
+        variant: &'a ModelRuntimeVariant,
+    ) -> OperationPlan {
+        let variant_id = variant.id.as_str();
+        let served_model_name = variant.served_model_name.as_str();
+
+        if let Some(fallback) = fallback_variant(runtime, variant) {
+            return OperationPlan {
+                risk: RiskLevel::NormalMutating,
+                summary: format!(
+                    "Start vLLM model {variant_id} on {} and wait for readiness at {}; fallback {} is used if MTP startup does not become healthy.",
+                    runtime.wsl_distro, runtime.models_endpoint, fallback.id
+                ),
+                commands: vec![self.vllm_command(
+                    &runtime.wsl_distro,
+                    HERMES_CONTROL_VLLM_START_WITH_FALLBACK_SCRIPT,
+                    &[variant_id, fallback.id.as_str()],
+                )],
+                requires_confirmation: false,
+            };
+        }
+
+        OperationPlan {
+            risk: RiskLevel::NormalMutating,
+            summary: format!(
+                "Start vLLM model {variant_id} on {} and wait for {} at {}.",
+                runtime.wsl_distro, served_model_name, runtime.models_endpoint
+            ),
+            commands: vec![
+                self.vllm_command(
+                    &runtime.wsl_distro,
+                    HERMES_CONTROL_VLLM_START_SCRIPT,
+                    &[variant_id],
+                ),
+                self.vllm_command(
+                    &runtime.wsl_distro,
+                    HERMES_CONTROL_VLLM_HEALTH_SCRIPT,
+                    &[served_model_name, "180", "ready"],
+                ),
+            ],
+            requires_confirmation: false,
+        }
+    }
+
+    fn restart_plan(
+        &self,
+        runtime: &'a ModelRuntimeConfig,
+        variant: &'a ModelRuntimeVariant,
+    ) -> OperationPlan {
+        let variant_id = variant.id.as_str();
+        let served_model_name = variant.served_model_name.as_str();
+
+        if let Some(fallback) = fallback_variant(runtime, variant) {
+            return OperationPlan {
+                risk: RiskLevel::Destructive,
+                summary: format!(
+                    "Restart vLLM model {variant_id} and allow fallback {} if MTP startup does not become healthy.",
+                    fallback.id
+                ),
+                commands: vec![
+                    self.vllm_command(
+                        &runtime.wsl_distro,
+                        HERMES_CONTROL_VLLM_STOP_SCRIPT,
+                        &[served_model_name],
+                    ),
+                    self.vllm_command(
+                        &runtime.wsl_distro,
+                        HERMES_CONTROL_VLLM_START_WITH_FALLBACK_SCRIPT,
+                        &[variant_id, fallback.id.as_str()],
+                    ),
+                ],
+                requires_confirmation: true,
+            };
+        }
+
+        OperationPlan {
+            risk: RiskLevel::Destructive,
+            summary: format!(
+                "Restart vLLM model {variant_id} and wait for {served_model_name} at {}.",
+                runtime.models_endpoint
+            ),
+            commands: vec![
+                self.vllm_command(
+                    &runtime.wsl_distro,
+                    HERMES_CONTROL_VLLM_STOP_SCRIPT,
+                    &[served_model_name],
+                ),
+                self.vllm_command(
+                    &runtime.wsl_distro,
+                    HERMES_CONTROL_VLLM_START_SCRIPT,
+                    &[variant_id],
+                ),
+                self.vllm_command(
+                    &runtime.wsl_distro,
+                    HERMES_CONTROL_VLLM_HEALTH_SCRIPT,
+                    &[served_model_name, "180", "ready"],
+                ),
+            ],
+            requires_confirmation: true,
+        }
+    }
+
     fn vllm_command(&self, distro: &str, script: &str, script_args: &[&str]) -> CommandPreview {
         let mut args = vec![
             "--distribution".to_owned(),
@@ -521,6 +584,28 @@ impl<'a> ModelRuntimeController<'a> {
         }
         .preview()
     }
+}
+
+fn fallback_variant<'a>(
+    runtime: &'a ModelRuntimeConfig,
+    variant: &'a ModelRuntimeVariant,
+) -> Option<&'a ModelRuntimeVariant> {
+    let speculative_method = variant.speculative_method.as_deref()?;
+    if !speculative_method.eq_ignore_ascii_case("mtp") {
+        return None;
+    }
+
+    runtime
+        .variants
+        .iter()
+        .find(|candidate| {
+            candidate.id != variant.id && candidate.mode.eq_ignore_ascii_case("stable")
+        })
+        .or_else(|| {
+            runtime.variants.iter().find(|candidate| {
+                candidate.id != variant.id && candidate.id.to_ascii_lowercase().contains("awq")
+            })
+        })
 }
 
 pub fn run_wsl_list_verbose() -> Result<Vec<WslDistroStatus>, ConfigError> {

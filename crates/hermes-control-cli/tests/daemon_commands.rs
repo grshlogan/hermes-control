@@ -162,6 +162,67 @@ async fn model_install_posts_typed_action_to_daemon() {
     assert!(rendered.contains("Install or repair vLLM runtime"));
 }
 
+#[tokio::test]
+async fn model_logs_posts_typed_action_to_daemon_and_renders_output() {
+    let server = OneShotHttpServer::new(
+        r#"{"status":"completed","risk":"ReadOnly","summary":"Executed 1 allowlisted command(s) for op_logs.","dry_run":false,"commands":[],"output":"tail line 1\ntail line 2\n"}"#,
+    );
+    let url = server.url();
+    let cli = Cli::try_parse_from([
+        "hermes-control",
+        "--daemon-url",
+        &url,
+        "--api-token",
+        "phase5-cli-token",
+        "model",
+        "logs",
+        "qwen36-mtp",
+        "--reason",
+        "phase5 logs smoke",
+    ])
+    .expect("CLI args should parse");
+
+    let rendered = run_cli(cli).await.expect("CLI command should run");
+    let request = server.join();
+
+    assert!(request.starts_with("POST /v1/models/qwen36-mtp/action HTTP/1.1"));
+    assert!(request.contains(r#""action":"Logs""#));
+    assert!(request.contains(r#""reason":"phase5 logs smoke""#));
+    assert!(request.contains(r#""dry_run":false"#));
+    assert!(rendered.contains("tail line 1"));
+    assert!(rendered.contains("tail line 2"));
+}
+
+#[tokio::test]
+async fn route_switch_posts_typed_request_to_daemon() {
+    let server = OneShotHttpServer::new(
+        r#"{"status":"completed","risk":"NormalMutating","summary":"Switched active route to external.test.","dry_run":false,"commands":[]}"#,
+    );
+    let url = server.url();
+    let cli = Cli::try_parse_from([
+        "hermes-control",
+        "--daemon-url",
+        &url,
+        "--api-token",
+        "phase6-cli-token",
+        "route",
+        "switch",
+        "external.test",
+        "--reason",
+        "phase6 route smoke",
+    ])
+    .expect("CLI args should parse");
+
+    let rendered = run_cli(cli).await.expect("CLI command should run");
+    let request = server.join();
+
+    assert!(request.starts_with("POST /v1/route/switch HTTP/1.1"));
+    assert!(request.contains(r#""profile_id":"external.test""#));
+    assert!(request.contains(r#""reason":"phase6 route smoke""#));
+    assert!(request.contains(r#""dry_run":false"#));
+    assert!(rendered.contains("Switched active route to external.test"));
+}
+
 struct OneShotHttpServer {
     address: String,
     handle: thread::JoinHandle<String>,

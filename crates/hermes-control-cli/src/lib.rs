@@ -3,9 +3,9 @@ use std::{env, path::PathBuf};
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use hermes_control_core::{collect_read_only_status, load_config_dir};
 use hermes_control_types::{
-    ActionRequest, CancelRequest, ConfirmRequest, ConfirmationLifecycleResponse, EndpointStatus,
-    HermesAction, ModelAction, ModelRuntimeSummary, OperationResponse, ProviderConfig,
-    ReadOnlyStatus, Requester, RequesterChannel, WslAction,
+    ActionRequest, ActiveRouteStatus, CancelRequest, ConfirmRequest, ConfirmationLifecycleResponse,
+    EndpointStatus, HermesAction, ModelAction, ModelRuntimeSummary, OperationResponse,
+    ProviderConfig, ReadOnlyStatus, Requester, RequesterChannel, RouteSwitchRequest, WslAction,
 };
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -71,6 +71,8 @@ pub enum Command {
 pub enum RouteCommand {
     #[command(about = "Show the active route")]
     Active,
+    #[command(about = "Switch the active AI route through the daemon")]
+    Switch(RouteSwitchArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -78,7 +80,7 @@ pub enum ModelCommand {
     #[command(about = "Show model runtime status")]
     Status { model_id: String },
     #[command(about = "Tail model runtime logs")]
-    Logs { model_id: String },
+    Logs(ModelActionArgs),
     #[command(about = "Install or repair the project-owned vLLM runtime")]
     Install(ModelActionArgs),
     #[command(about = "Start a local model runtime through the daemon")]
@@ -140,6 +142,14 @@ pub struct ModelActionArgs {
     pub options: ActionOptions,
 }
 
+#[derive(Debug, Clone, Args)]
+pub struct RouteSwitchArgs {
+    pub profile_id: String,
+
+    #[command(flatten)]
+    pub options: ActionOptions,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CliOutputFormat {
     Text,
@@ -171,10 +181,26 @@ pub async fn run_cli(cli: Cli) -> anyhow::Result<String> {
             let status = collect_read_only_status(&cli.config_dir).await?;
             render_models(&status.models, format)
         }
-        Some(Command::Route(RouteCommand::Active)) => Ok(match format {
-            CliOutputFormat::Json => "{\"active_route\":null}".to_owned(),
-            CliOutputFormat::Text => "Active route: unavailable until Phase 3 state DB".to_owned(),
-        }),
+        Some(Command::Route(RouteCommand::Active)) => {
+            let response = daemon
+                .get_json::<ActiveRouteStatus>("/v1/route/active")
+                .await?;
+            render_active_route(&response, format)
+        }
+        Some(Command::Route(RouteCommand::Switch(args))) => {
+            let response = daemon
+                .post_json::<_, OperationResponse>(
+                    "/v1/route/switch",
+                    &RouteSwitchRequest {
+                        requester: cli_requester(),
+                        profile_id: args.profile_id,
+                        reason: args.options.reason,
+                        dry_run: args.options.dry_run,
+                    },
+                )
+                .await?;
+            render_operation_response(&response, format)
+        }
         Some(Command::Model(ModelCommand::Status { model_id })) => {
             let status = collect_read_only_status(&cli.config_dir).await?;
             let models = status
@@ -184,9 +210,6 @@ pub async fn run_cli(cli: Cli) -> anyhow::Result<String> {
                 .collect::<Vec<_>>();
             render_models(&models, format)
         }
-        Some(Command::Model(ModelCommand::Logs { model_id })) => Ok(format!(
-            "Model logs for {model_id}: log tailing by model id lands in Phase 5"
-        )),
         Some(Command::Model(command)) => {
             let (model_id, action, options) = model_action(command);
             let response = daemon
@@ -301,6 +324,12 @@ pub fn render_operation_response(
                 .iter()
                 .map(|command| format!("  {} {}", command.program, command.args.join(" "))),
         );
+    }
+    if let Some(output) = &response.output
+        && !output.is_empty()
+    {
+        lines.push("Output:".to_owned());
+        lines.push(output.trim_end().to_owned());
     }
 
     Ok(lines.join("\n"))
@@ -430,6 +459,24 @@ pub fn render_models(
         .join("\n"))
 }
 
+pub fn render_active_route(
+    route: &ActiveRouteStatus,
+    format: CliOutputFormat,
+) -> anyhow::Result<String> {
+    if format == CliOutputFormat::Json {
+        return Ok(serde_json::to_string_pretty(route)?);
+    }
+
+    let active = route.active_profile_id.as_deref().unwrap_or("none");
+    let last_known_good = route
+        .last_known_good_profile_id
+        .as_deref()
+        .unwrap_or("none");
+    Ok(format!(
+        "Active route: {active}\nLast known good: {last_known_good}"
+    ))
+}
+
 fn format_endpoint(label: &str, endpoint: &EndpointStatus) -> String {
     if endpoint.reachable {
         format!(
@@ -452,6 +499,28 @@ struct DaemonClientConfig {
 }
 
 impl DaemonClientConfig {
+    async fn get_json<R>(&self, path: &str) -> anyhow::Result<R>
+    where
+        R: DeserializeOwned,
+    {
+        let token = self
+            .api_token
+            .clone()
+            .or_else(|| env::var("HERMES_CONTROL_API_TOKEN").ok())
+            .ok_or_else(|| {
+                anyhow::anyhow!("daemon CLI calls require --api-token or HERMES_CONTROL_API_TOKEN")
+            })?;
+        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
+        let response = reqwest::Client::new()
+            .get(url)
+            .bearer_auth(token)
+            .send()
+            .await?
+            .error_for_status()?;
+
+        Ok(response.json::<R>().await?)
+    }
+
     async fn post_json<T, R>(&self, path: &str, body: &T) -> anyhow::Result<R>
     where
         T: Serialize + ?Sized,
@@ -505,8 +574,9 @@ fn model_action(command: ModelCommand) -> (String, ModelAction, ActionOptions) {
         ModelCommand::Stop(args) => (args.model_id, ModelAction::Stop, args.options),
         ModelCommand::Restart(args) => (args.model_id, ModelAction::Restart, args.options),
         ModelCommand::Health(args) => (args.model_id, ModelAction::Health, args.options),
+        ModelCommand::Logs(args) => (args.model_id, ModelAction::Logs, args.options),
         ModelCommand::Benchmark(args) => (args.model_id, ModelAction::Benchmark, args.options),
-        ModelCommand::Status { .. } | ModelCommand::Logs { .. } => {
+        ModelCommand::Status { .. } => {
             unreachable!("read-only model commands are handled before action mapping")
         }
     }

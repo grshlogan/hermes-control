@@ -18,10 +18,10 @@ use hermes_control_core::{
     collect_read_only_status, load_config_dir,
 };
 use hermes_control_types::{
-    ActionRequest, ActiveRouteStatus, AuditEventSummary, CancelRequest, CommandPreview,
-    ConfirmRequest, ConfirmationLifecycleResponse, HealthStatus, HermesAction, ModelAction,
-    ModelRuntimeSummary, OperationResponse, ProviderConfig, ReadOnlyStatus, Requester,
-    RequesterChannel, RiskLevel, WslAction,
+    ActionRequest, ActiveRouteStatus, AiProviderKind, AuditEventSummary, CancelRequest,
+    CommandPreview, ConfirmRequest, ConfirmationLifecycleResponse, HealthStatus, HermesAction,
+    ModelAction, ModelRuntimeSummary, OperationResponse, ProviderConfig, ReadOnlyStatus, Requester,
+    RequesterChannel, RiskLevel, RouteSwitchRequest, WslAction,
 };
 use rusqlite::{Connection, OptionalExtension};
 use thiserror::Error;
@@ -71,6 +71,7 @@ pub struct ExecutableOperation {
 pub struct ExecutionOutcome {
     pub status: String,
     pub summary: String,
+    pub output: Option<String>,
 }
 
 pub trait OperationExecutor: Send + Sync + 'static {
@@ -136,6 +137,7 @@ impl OperationExecutor for WindowsCommandExecutor {
                         command.program,
                         command.args.join(" ")
                     ),
+                    output: None,
                 };
             }
         }
@@ -147,9 +149,11 @@ impl OperationExecutor for WindowsCommandExecutor {
                     "Operation {} has no command previews to execute.",
                     operation.id
                 ),
+                output: None,
             };
         }
 
+        let mut captured_stdout = String::new();
         for command in &operation.commands {
             let output = self.runner.run(command);
             if output.status_code != 0 {
@@ -160,8 +164,10 @@ impl OperationExecutor for WindowsCommandExecutor {
                         output.status_code,
                         output.stderr.trim()
                     ),
+                    output: (!output.stdout.is_empty()).then_some(output.stdout),
                 };
             }
+            captured_stdout.push_str(&output.stdout);
         }
 
         ExecutionOutcome {
@@ -171,6 +177,7 @@ impl OperationExecutor for WindowsCommandExecutor {
                 operation.commands.len(),
                 operation.id
             ),
+            output: (!captured_stdout.is_empty()).then_some(captured_stdout),
         }
     }
 }
@@ -186,6 +193,7 @@ impl OperationExecutor for NoopOperationExecutor {
                 "No-op executor accepted operation {} without running system commands.",
                 operation.id
             ),
+            output: None,
         }
     }
 }
@@ -231,6 +239,7 @@ pub fn build_router_with_executor(
         .route("/v1/models/{model_id}", get(model_status))
         .route("/v1/models/{model_id}/action", post(model_action))
         .route("/v1/route/active", get(active_route))
+        .route("/v1/route/switch", post(route_switch))
         .route("/v1/audit", get(audit_events))
         .route("/v1/wsl/status", get(wsl_status))
         .route("/v1/wsl/action", post(wsl_action))
@@ -318,6 +327,104 @@ async fn active_route(
     state.store.active_route().map(Json).map_err(|err| {
         tracing::warn!(error = %err, "failed to read active route");
         StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
+
+async fn route_switch(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<RouteSwitchRequest>,
+) -> ApiResult<OperationResponse> {
+    require_auth(&state, &headers)?;
+    let config = load_config_dir(&*state.config_dir).map_err(|err| {
+        tracing::warn!(error = %err, "failed to load route switch config");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let provider = config
+        .providers
+        .providers
+        .into_iter()
+        .find(|provider| provider.id == request.profile_id)
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let summary = if request.dry_run {
+        format!("Switch active route to {}.", request.profile_id)
+    } else {
+        format!("Switched active route to {}.", request.profile_id)
+    };
+
+    if request.dry_run {
+        return Ok(Json(OperationResponse {
+            status: "dry_run".to_owned(),
+            risk: RiskLevel::NormalMutating,
+            summary,
+            dry_run: true,
+            commands: Vec::new(),
+            output: None,
+            confirmation_id: None,
+            code_hint: None,
+            expires_at: None,
+        }));
+    }
+
+    if matches!(provider.kind, AiProviderKind::LocalVllm) {
+        let status = collect_read_only_status(&*state.config_dir)
+            .await
+            .map_err(|err| {
+                tracing::warn!(error = %err, "failed to collect local route readiness");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        if !local_vllm_provider_ready(&provider, &status) {
+            return Err(StatusCode::CONFLICT);
+        }
+    }
+
+    if state.store.has_active_operation().map_err(|err| {
+        tracing::warn!(error = %err, "failed to check operation lock");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })? {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    let action = format!("route::switch::{}", request.profile_id);
+    state
+        .store
+        .switch_route(
+            &request.requester,
+            &action,
+            &request.profile_id,
+            &request.reason,
+            &summary,
+        )
+        .map_err(|err| {
+            tracing::warn!(error = %err, "failed to switch active route");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(OperationResponse {
+        status: "completed".to_owned(),
+        risk: RiskLevel::NormalMutating,
+        summary,
+        dry_run: false,
+        commands: Vec::new(),
+        output: None,
+        confirmation_id: None,
+        code_hint: None,
+        expires_at: None,
+    }))
+}
+
+fn local_vllm_provider_ready(provider: &ProviderConfig, status: &ReadOnlyStatus) -> bool {
+    let (Some(runtime_id), Some(served_model_name)) =
+        (&provider.model_runtime, &provider.served_model_name)
+    else {
+        return false;
+    };
+
+    status.models.iter().any(|model| {
+        model.runtime_id == *runtime_id
+            && model.served_model_name == *served_model_name
+            && model.ready
     })
 }
 
@@ -447,6 +554,7 @@ fn operation_response(
             summary: plan.summary,
             dry_run: true,
             commands: plan.commands,
+            output: None,
             confirmation_id: None,
             code_hint: None,
             expires_at: None,
@@ -484,6 +592,7 @@ fn operation_response(
             summary: plan.summary,
             dry_run: false,
             commands: plan.commands,
+            output: None,
             confirmation_id: Some(confirmation.id),
             code_hint: Some(confirmation.code_hint),
             expires_at: Some(confirmation.expires_at),
@@ -525,6 +634,7 @@ fn operation_response(
         summary: outcome.summary,
         dry_run: false,
         commands: plan.commands,
+        output: outcome.output,
         confirmation_id: None,
         code_hint: None,
         expires_at: None,
@@ -619,6 +729,9 @@ impl DaemonStateStore {
             CREATE TABLE IF NOT EXISTS route_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 active_profile_id TEXT,
+                last_known_good_profile_id TEXT,
+                updated_by TEXT,
+                reason TEXT,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             INSERT OR IGNORE INTO route_state (id, active_profile_id) VALUES (1, NULL);
@@ -649,6 +762,14 @@ impl DaemonStateStore {
             );
             ",
         )?;
+        ensure_state_column(
+            &state_connection,
+            "route_state",
+            "last_known_good_profile_id",
+            "TEXT",
+        )?;
+        ensure_state_column(&state_connection, "route_state", "updated_by", "TEXT")?;
+        ensure_state_column(&state_connection, "route_state", "reason", "TEXT")?;
         ensure_state_column(
             &state_connection,
             "operation_state",
@@ -686,16 +807,81 @@ impl DaemonStateStore {
 
     fn active_route(&self) -> Result<ActiveRouteStatus, DaemonError> {
         let connection = Connection::open(&*self.state_db)?;
-        let active_profile_id = connection
+        let route = connection
             .query_row(
-                "SELECT active_profile_id FROM route_state WHERE id = 1",
+                "SELECT active_profile_id, last_known_good_profile_id FROM route_state WHERE id = 1",
                 [],
-                |row| row.get::<_, Option<String>>(0),
+                |row| {
+                    Ok(ActiveRouteStatus {
+                        active_profile_id: row.get(0)?,
+                        last_known_good_profile_id: row.get(1)?,
+                    })
+                },
+            )
+            .optional()?;
+
+        Ok(route.unwrap_or(ActiveRouteStatus {
+            active_profile_id: None,
+            last_known_good_profile_id: None,
+        }))
+    }
+
+    fn switch_route(
+        &self,
+        requester: &Requester,
+        action: &str,
+        profile_id: &str,
+        reason: &str,
+        summary: &str,
+    ) -> Result<(), DaemonError> {
+        let operation_id = format!("op_{}", unix_epoch_nanos());
+        let connection = Connection::open(&*self.state_db)?;
+        let current_route = connection
+            .query_row(
+                "SELECT active_profile_id, last_known_good_profile_id FROM route_state WHERE id = 1",
+                [],
+                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
             )
             .optional()?
-            .flatten();
+            .unwrap_or((None, None));
+        let next_last_known_good = match current_route.0 {
+            Some(current) if current != profile_id => Some(current),
+            _ => current_route.1,
+        };
 
-        Ok(ActiveRouteStatus { active_profile_id })
+        connection.execute(
+            "
+            UPDATE route_state
+            SET active_profile_id = ?1,
+                last_known_good_profile_id = ?2,
+                updated_by = ?3,
+                reason = ?4,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = 1
+            ",
+            (
+                profile_id,
+                &next_last_known_good,
+                &requester.user_id,
+                reason,
+            ),
+        )?;
+        connection.execute(
+            "
+            INSERT INTO operation_state (
+                id, action, status, requester_channel, requester_user_id, summary, commands_json
+            )
+            VALUES (?1, ?2, 'completed', ?3, ?4, ?5, '[]')
+            ",
+            (
+                &operation_id,
+                action,
+                requester_channel_label(&requester.channel),
+                &requester.user_id,
+                summary,
+            ),
+        )?;
+        self.append_audit_summary(requester, action, "NormalMutating", summary)
     }
 
     fn audit_events(&self, limit: usize) -> Result<Vec<AuditEventSummary>, DaemonError> {
@@ -1134,6 +1320,9 @@ fn is_allowlisted_vllm_script(user: &str, script: &str, args: &[String]) -> bool
 
     match (script_name, args) {
         ("hermes-control-vllm-start.sh", [variant]) => is_safe_identifier(variant),
+        ("hermes-control-vllm-start-with-fallback.sh", [primary, fallback]) => {
+            is_safe_identifier(primary) && is_safe_identifier(fallback)
+        }
         ("hermes-control-vllm-stop.sh", [served_model]) => is_safe_identifier(served_model),
         ("hermes-control-vllm-health.sh", [served_model, timeout, mode]) => {
             is_safe_identifier(served_model)

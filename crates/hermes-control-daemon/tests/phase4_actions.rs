@@ -167,22 +167,9 @@ async fn model_start_dry_run_returns_fixed_vllm_script_previews() {
             "--user",
             "root",
             "--exec",
-            "/opt/hermes-control/bin/hermes-control-vllm-start.sh",
-            "qwen36-mtp"
-        ])
-    );
-    assert_eq!(
-        response["commands"][1]["args"],
-        json!([
-            "--distribution",
-            "Ubuntu-Hermes-Codex",
-            "--user",
-            "root",
-            "--exec",
-            "/opt/hermes-control/bin/hermes-control-vllm-health.sh",
+            "/opt/hermes-control/bin/hermes-control-vllm-start-with-fallback.sh",
             "qwen36-mtp",
-            "180",
-            "ready"
+            "qwen36-awq-int4"
         ])
     );
 }
@@ -478,6 +465,7 @@ impl OperationExecutor for RecordingExecutor {
         ExecutionOutcome {
             status: "completed".to_owned(),
             summary: "recorded by test executor".to_owned(),
+            output: None,
         }
     }
 }
@@ -489,6 +477,7 @@ impl OperationExecutor for FailingExecutor {
         ExecutionOutcome {
             status: "failed".to_owned(),
             summary: "simulated executor failure".to_owned(),
+            output: None,
         }
     }
 }
@@ -642,8 +631,9 @@ fn windows_executor_allows_fixed_vllm_wsl_scripts() {
                     "--user",
                     "root",
                     "--exec",
-                    "/opt/hermes-control/bin/hermes-control-vllm-start.sh",
+                    "/opt/hermes-control/bin/hermes-control-vllm-start-with-fallback.sh",
                     "qwen36-mtp",
+                    "qwen36-awq-int4",
                 ],
             ),
             command(
@@ -686,6 +676,41 @@ fn windows_executor_allows_fixed_vllm_wsl_scripts() {
 }
 
 #[test]
+fn windows_executor_returns_stdout_for_log_actions() {
+    let runner = Arc::new(StdoutRunner);
+    let executor = WindowsCommandExecutor::new(runner);
+    let operation = ExecutableOperation {
+        id: "op_logs".to_owned(),
+        confirmation_id: String::new(),
+        action: "model::qwen36-mtp::Logs".to_owned(),
+        requester_channel: "cli".to_owned(),
+        requester_user_id: "phase5-test".to_owned(),
+        summary: "Tail vLLM logs".to_owned(),
+        commands: vec![command(
+            "wsl.exe",
+            [
+                "--distribution",
+                "Ubuntu-Hermes-Codex",
+                "--user",
+                "root",
+                "--exec",
+                "/opt/hermes-control/bin/hermes-control-vllm-logs.sh",
+                "qwen36-mtp",
+                "200",
+            ],
+        )],
+    };
+
+    let outcome = executor.execute(&operation);
+
+    assert_eq!(outcome.status, "completed");
+    assert_eq!(
+        outcome.output.as_deref(),
+        Some("tail line 1\ntail line 2\n")
+    );
+}
+
+#[test]
 fn windows_executor_rejects_unknown_hermes_wsl_scripts() {
     let runner = Arc::new(RecordingRunner::default());
     let executor = WindowsCommandExecutor::new(runner.clone());
@@ -719,6 +744,18 @@ fn windows_executor_rejects_unknown_hermes_wsl_scripts() {
 #[derive(Default)]
 struct RecordingRunner {
     commands: Mutex<Vec<hermes_control_types::CommandPreview>>,
+}
+
+struct StdoutRunner;
+
+impl CommandRunner for StdoutRunner {
+    fn run(&self, _command: &hermes_control_types::CommandPreview) -> CommandOutput {
+        CommandOutput {
+            status_code: 0,
+            stdout: "tail line 1\ntail line 2\n".to_owned(),
+            stderr: String::new(),
+        }
+    }
 }
 
 impl CommandRunner for RecordingRunner {
@@ -877,6 +914,15 @@ wsl_distro = "Ubuntu-Hermes-Codex"
 endpoint = "http://127.0.0.1:9/v1"
 models_endpoint = "http://127.0.0.1:9/v1/models"
 log_dir = "E:\\WSL\\Hermres\\hermes-control\\vLLM\\logs"
+
+[[runtimes.variants]]
+id = "qwen36-awq-int4"
+served_model_name = "qwen36-awq-int4"
+mode = "stable"
+max_model_len = 90000
+start = { kind = "wsl_script", script = "/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/start-qwen36-int4-eager.sh" }
+stop = { kind = "process_match", served_model_name = "qwen36-awq-int4" }
+profiles = ["vllm.qwen36-awq-int4"]
 
 [[runtimes.variants]]
 id = "qwen36-mtp"
