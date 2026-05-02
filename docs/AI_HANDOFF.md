@@ -102,24 +102,25 @@ runtime claims.
 
 Latest pushed commits:
 
+- `90a5a99 feat: add WSL root helper integration`
 - `c95855c feat: add Hermes fixed-script execution boundary`
 - `44a6eaa feat: expose execution status on confirm`
 - `660a210 feat: wire allowlisted Windows executor`
 - `87ac3dc feat: add injectable operation executor`
-- `c865ed5 feat: add confirmation lifecycle and operation lock`
 
 ## Current Phase
 
-Phase 4 remaining work should stay focused on safe execution after the typed
-planning layer:
+Phase 4 is functionally closed after the CLI closeout changes are committed.
+Current local unpushed closeout work:
 
-- Commit the current WSL root helper contract after explicit user approval.
-- The helper-script false-positive issue is addressed by product-owned helpers
-  that use `/proc` PID scanning plus HTTP readiness instead of legacy
-  `service-status.sh` probes.
-- Move CLI mutating commands to daemon API calls after executor behavior is
-  covered.
-- Keep Phase 5 vLLM runtime work out of Phase 4.
+- CLI mutating commands call daemon APIs for Hermes, WSL, confirm, and cancel.
+- Confirmed Hermes restart was smoke-tested through CLI -> daemon ->
+  `/opt/hermes-control/bin` WSL root helpers and returned `Execution:
+  completed`.
+- Final observed Hermes health was `http://127.0.0.1:8642/health` ready with a
+  fresh PID after restart.
+- Keep Phase 5 vLLM runtime work out of Phase 4; the next phase should focus on
+  first-class vLLM runtime management.
 
 ## Useful Commands
 
@@ -145,6 +146,16 @@ cargo run -p hermes-control-cli -- status
 cargo run -p hermes-control-cli -- status --json
 cargo run -p hermes-control-cli -- providers
 cargo run -p hermes-control-cli -- models
+```
+
+Phase 4 daemon CLI smoke:
+
+```powershell
+$env:HERMES_CONTROL_API_TOKEN = "phase4-token"
+cargo run -p hermes-control-daemon
+cargo run -p hermes-control-cli -- --api-token phase4-token hermes restart --dry-run --reason "smoke"
+cargo run -p hermes-control-cli -- --api-token phase4-token hermes wake --reason "smoke"
+cargo run -p hermes-control-cli -- --api-token phase4-token confirm HERMES-1234
 ```
 
 ## Handoff Notes

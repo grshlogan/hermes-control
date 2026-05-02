@@ -957,6 +957,9 @@ Completion signal:
 
 - WSL can be restarted while daemon survives.
 - Hermes can be restarted and health-checked.
+- CLI mutating WSL/Hermes commands call daemon APIs, not local process control.
+- Status as of 2026-05-02: functionally complete after WSL root helper install
+  flow, CLI daemon mutating commands, and confirmed Hermes restart smoke.
 
 ### Phase 5 — vLLM Runtime Manager
 

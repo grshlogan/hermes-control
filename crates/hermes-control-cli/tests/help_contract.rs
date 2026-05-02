@@ -2,7 +2,7 @@ use clap::CommandFactory;
 use hermes_control_cli::Cli;
 
 #[test]
-fn help_lists_phase_one_command_surface() {
+fn help_lists_current_command_surface() {
     let mut buffer = Vec::new();
     Cli::command()
         .write_long_help(&mut buffer)
@@ -15,9 +15,12 @@ fn help_lists_phase_one_command_surface() {
         "health",
         "providers",
         "route",
+        "hermes",
         "models",
         "model",
         "wsl",
+        "confirm",
+        "cancel",
         "--json",
     ] {
         assert!(

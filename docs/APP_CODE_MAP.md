@@ -67,8 +67,10 @@ This map explains where to work in the Hermes Control Rust workspace.
 
 - `crates/hermes-control-cli`
   - Clap command definitions and CLI rendering.
-  - Current commands are read-only and call core directly.
-  - Later mutating commands should become daemon API calls.
+  - Read-only status/providers/models commands still call core directly.
+  - Phase 4 mutating commands call daemon APIs with bearer auth:
+    `hermes <wake|stop|restart|kill>`,
+    `wsl <wake|stop|restart|shutdown-all>`, `confirm <code>`, and `cancel`.
 
 - `crates/hermes-control-bot`
   - Windows-hosted Teloxide subprocess.
@@ -97,6 +99,8 @@ This map explains where to work in the Hermes Control Rust workspace.
 - `crates/hermes-control-cli/tests/help_contract.rs`: CLI help contract.
 - `crates/hermes-control-cli/tests/read_only_commands.rs`: read-only CLI
   rendering behavior.
+- `crates/hermes-control-cli/tests/daemon_commands.rs`: CLI mutating daemon API
+  request contract.
 - `crates/hermes-control-bot/tests/bot_boundary.rs`: bot allowlist, command
   mapping, and no raw subprocess boundary.
 - `crates/hermes-control-daemon/tests/phase3_api.rs`: daemon bearer auth,

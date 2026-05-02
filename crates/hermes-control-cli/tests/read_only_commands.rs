@@ -12,7 +12,7 @@ fn sample_status() -> ReadOnlyStatus {
             version: Some(2),
             default: true,
         }),
-        hermes: EndpointStatus::ok("http://127.0.0.1:18000/health", 200),
+        hermes: EndpointStatus::ok("http://127.0.0.1:8642/health", 200),
         models: vec![ModelRuntimeSummary {
             runtime_id: "vllm-local".to_owned(),
             variant_id: "qwen36-mtp".to_owned(),

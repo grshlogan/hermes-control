@@ -211,3 +211,15 @@ unimplemented ideas here.
   `root` and match the canonical helper filenames.
 - Added tests covering canonical helper previews, allowlist acceptance, and WSL
   install asset presence.
+
+## 2026-05-02: Phase 4 CLI daemon closeout
+
+- Added CLI daemon API support for `hermes <wake|stop|restart|kill>`,
+  `wsl <wake|stop|restart|shutdown-all>`, `confirm <code>`, and `cancel`.
+- Added global `--daemon-url` and `--api-token` options, with
+  `HERMES_CONTROL_API_TOKEN` fallback for mutating calls.
+- Added HTTP-level CLI tests proving mutating commands post typed JSON with
+  bearer auth to `/v1/hermes/action`, `/v1/wsl/action`, and `/v1/confirm`.
+- Smoke-tested CLI -> daemon -> WSL root helper execution with a confirmed
+  Hermes restart; execution completed and Hermes health returned ready on
+  `http://127.0.0.1:8642/health`.

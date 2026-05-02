@@ -1,0 +1,177 @@
+use std::{
+    io::{Read, Write},
+    net::TcpListener,
+    thread,
+};
+
+use clap::Parser;
+use hermes_control_cli::{Cli, run_cli};
+
+#[tokio::test]
+async fn wsl_restart_posts_typed_action_to_daemon() {
+    let server = OneShotHttpServer::new(
+        r#"{"status":"dry_run","risk":"Destructive","summary":"Restart WSL distro Ubuntu-Hermes-Codex","dry_run":true,"commands":[]}"#,
+    );
+    let url = server.url();
+    let cli = Cli::try_parse_from([
+        "hermes-control",
+        "--daemon-url",
+        &url,
+        "--api-token",
+        "phase4-cli-token",
+        "wsl",
+        "restart",
+        "--dry-run",
+        "--reason",
+        "phase4 CLI smoke",
+    ])
+    .expect("CLI args should parse");
+
+    let rendered = run_cli(cli).await.expect("CLI command should run");
+    let request = server.join();
+
+    assert!(request.starts_with("POST /v1/wsl/action HTTP/1.1"));
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer phase4-cli-token")
+    );
+    assert!(request.contains(r#""channel":"cli""#));
+    assert!(request.contains(r#""action":"RestartDistro""#));
+    assert!(request.contains(r#""reason":"phase4 CLI smoke""#));
+    assert!(request.contains(r#""dry_run":true"#));
+    assert!(rendered.contains("dry_run"));
+    assert!(rendered.contains("Restart WSL distro Ubuntu-Hermes-Codex"));
+}
+
+#[tokio::test]
+async fn hermes_kill_posts_typed_action_to_daemon() {
+    let server = OneShotHttpServer::new(
+        r#"{"status":"confirmation_required","risk":"Destructive","summary":"Kill Hermes runtime","dry_run":false,"commands":[],"confirmation_id":"confirm_test","code_hint":"HERMES-1234","expires_at":"2026-05-02T13:00:00Z"}"#,
+    );
+    let url = server.url();
+    let cli = Cli::try_parse_from([
+        "hermes-control",
+        "--daemon-url",
+        &url,
+        "--api-token",
+        "phase4-cli-token",
+        "hermes",
+        "kill",
+        "--reason",
+        "phase4 CLI smoke",
+    ])
+    .expect("CLI args should parse");
+
+    let rendered = run_cli(cli).await.expect("CLI command should run");
+    let request = server.join();
+
+    assert!(request.starts_with("POST /v1/hermes/action HTTP/1.1"));
+    assert!(request.contains(r#""action":"Kill""#));
+    assert!(request.contains(r#""dry_run":false"#));
+    assert!(rendered.contains("confirmation_required"));
+    assert!(rendered.contains("HERMES-1234"));
+}
+
+#[tokio::test]
+async fn confirm_posts_code_to_daemon_confirmation_endpoint() {
+    let server = OneShotHttpServer::new(
+        r#"{"status":"confirmed","confirmation_id":"confirm_test","summary":"Restart done","execution_status":"completed"}"#,
+    );
+    let url = server.url();
+    let cli = Cli::try_parse_from([
+        "hermes-control",
+        "--daemon-url",
+        &url,
+        "--api-token",
+        "phase4-cli-token",
+        "confirm",
+        "HERMES-1234",
+    ])
+    .expect("CLI args should parse");
+
+    let rendered = run_cli(cli).await.expect("CLI command should run");
+    let request = server.join();
+
+    assert!(request.starts_with("POST /v1/confirm HTTP/1.1"));
+    assert!(request.contains(r#""code":"HERMES-1234""#));
+    assert!(rendered.contains("confirmed"));
+    assert!(rendered.contains("completed"));
+}
+
+struct OneShotHttpServer {
+    address: String,
+    handle: thread::JoinHandle<String>,
+}
+
+impl OneShotHttpServer {
+    fn new(response_body: &'static str) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("test server should bind");
+        let address = listener.local_addr().expect("local addr").to_string();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("request should arrive");
+            let request = read_http_request(&mut stream);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("response should write");
+            request
+        });
+
+        Self { address, handle }
+    }
+
+    fn url(&self) -> String {
+        format!("http://{}", self.address)
+    }
+
+    fn join(self) -> String {
+        self.handle.join().expect("server thread should finish")
+    }
+}
+
+fn read_http_request(stream: &mut impl Read) -> String {
+    let mut bytes = Vec::new();
+    let mut buffer = [0_u8; 1024];
+
+    loop {
+        let read = stream.read(&mut buffer).expect("request should read");
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+        if bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+    }
+
+    let header_end = bytes
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("headers should complete")
+        + 4;
+    let headers = String::from_utf8_lossy(&bytes[..header_end]).to_string();
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().ok())
+                .flatten()
+        })
+        .unwrap_or(0);
+
+    while bytes.len().saturating_sub(header_end) < content_length {
+        let read = stream.read(&mut buffer).expect("body should read");
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+    }
+
+    String::from_utf8(bytes).expect("request should be utf8")
+}
