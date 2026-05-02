@@ -62,12 +62,18 @@ Phase 4 has started:
   anything and currently allows only fixed WSL command shapes:
   `wsl.exe --shutdown`, `wsl.exe --terminate <safe-distro>`, and
   `wsl.exe --distribution <safe-distro> --user <safe-user> --exec true`.
+- Hermes restart/stop/kill plans now produce fixed WSL script previews under
+  the configured WSL user's `$HOME/Hermres`: `restart-services.sh`,
+  `stop-services.sh`, `kill-stuck-services.sh`, and `health-check.sh 30 ready`.
+- Confirmed Hermes destructive operations can now flow to the Windows executor
+  through that fixed script allowlist. This requires the Linux-side helper
+  scripts to exist for the configured WSL user.
 - The daemon binary uses `WindowsCommandExecutor`; tests use fake or no-op
   executors.
 - Failed executor outcomes are stored as `failed` operation state and release
   the pending operation lock for a later retry.
-- Hermes runtime process execution remains intentionally unimplemented until
-  typed Hermes command builders and failure handling are covered.
+- Non-confirming wake actions still need an immediate execution path; today they
+  return a typed plan rather than running directly.
 
 ## Current Runtime Observation
 
@@ -85,11 +91,11 @@ runtime claims.
 
 Latest pushed commits:
 
+- `44a6eaa feat: expose execution status on confirm`
+- `660a210 feat: wire allowlisted Windows executor`
 - `87ac3dc feat: add injectable operation executor`
 - `c865ed5 feat: add confirmation lifecycle and operation lock`
 - `3e4f2f1 feat: add phase4 typed operation previews`
-- `2d49981 feat: start daemon API and SQLite state`
-- `4bc4d1d docs: add AI handoff and change log`
 
 ## Current Phase
 
@@ -98,8 +104,9 @@ planning layer:
 
 - Extend real execution beyond the current WSL allowlist only through typed
   builders and focused tests.
-- Keep WSL/Hermes real execution behind typed builders, audit, confirmation, and
-  the operation lock.
+- Add immediate execution/state handling for normal mutating wake actions.
+- Keep any further WSL/Hermes real execution behind typed builders, audit,
+  confirmation when required, and the operation lock.
 - Move CLI mutating commands to daemon API calls after executor behavior is
   covered.
 

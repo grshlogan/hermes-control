@@ -48,17 +48,45 @@ fn wsl_shutdown_all_plan_is_destructive_and_fixed() {
 }
 
 #[test]
-fn hermes_kill_plan_requires_confirmation_without_raw_shell() {
-    let controller = HermesRuntimeController::new(
+fn hermes_restart_plan_uses_fixed_wsl_scripts_and_health_check() {
+    let controller = HermesRuntimeController::with_wsl(
         "E:\\WSL\\Hermres\\hermes-agent",
         "http://127.0.0.1:18000/health",
+        "Ubuntu-Hermes-Codex",
+        "hermes",
     );
 
-    let plan = controller.plan(HermesAction::Kill);
+    let plan = controller.plan(HermesAction::Restart);
 
     assert_eq!(plan.risk, RiskLevel::Destructive);
     assert!(plan.requires_confirmation);
-    assert!(plan.summary.contains("Kill Hermes runtime"));
+    assert!(plan.summary.contains("Restart Hermes runtime"));
     assert!(plan.summary.contains("E:\\WSL\\Hermres\\hermes-agent"));
-    assert!(plan.commands.is_empty());
+    assert_eq!(plan.commands.len(), 2);
+    assert_eq!(plan.commands[0].program, "wsl.exe");
+    assert_eq!(
+        plan.commands[0].args,
+        [
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "hermes",
+            "--exec",
+            "/home/hermes/Hermres/restart-services.sh"
+        ]
+    );
+    assert_eq!(plan.commands[1].program, "wsl.exe");
+    assert_eq!(
+        plan.commands[1].args,
+        [
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "hermes",
+            "--exec",
+            "/home/hermes/Hermres/health-check.sh",
+            "30",
+            "ready"
+        ]
+    );
 }

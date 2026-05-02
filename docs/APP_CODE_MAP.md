@@ -27,6 +27,9 @@ This map explains where to work in the Hermes Control Rust workspace.
   - Local read-only status collection.
   - WSL verbose-list parser and fixed `wsl.exe --list --verbose` command spec.
   - Phase 4 WSL/Hermes operation plan builders and dry-run command previews.
+  - Hermes WSL script previews for `start-services.sh`, `stop-services.sh`,
+    `restart-services.sh`, `kill-stuck-services.sh`, and
+    `health-check.sh 30 ready`.
   - HTTP endpoint checks and vLLM `/v1/models` parsing.
   - Local log-tail helper.
   - Future home for executor abstractions shared by daemon and tests.
@@ -46,7 +49,8 @@ This map explains where to work in the Hermes Control Rust workspace.
     library/test usage.
   - Daemon binary wires `WindowsCommandExecutor`, which executes only
     allowlisted WSL command-preview shapes after confirmation.
-  - Still needs typed Hermes runtime execution and broader failure handling.
+  - Hermes destructive operations now reach the executor through fixed WSL
+    script previews; normal wake actions still need immediate execution wiring.
 
 - `crates/hermes-control-cli`
   - Clap command definitions and CLI rendering.
@@ -83,12 +87,13 @@ This map explains where to work in the Hermes Control Rust workspace.
 - `crates/hermes-control-daemon/tests/phase3_api.rs`: daemon bearer auth,
   SQLite initialization, and read-only API route behavior.
 - `crates/hermes-control-core/tests/phase4_operation_plans.rs`: WSL/Hermes typed
-  operation planning and command-preview behavior.
+  operation planning, fixed WSL command previews, and Hermes script preview
+  behavior.
 - `crates/hermes-control-daemon/tests/phase4_actions.rs`: daemon dry-run action
   responses, confirmation records, audit preview events, confirm/cancel, and
   operation-lock release behavior, plus injected executor dispatch after
-  confirmation, failed execution outcome reporting, and Windows command
-  allowlist enforcement.
+  confirmation, failed execution outcome reporting, Hermes fixed-script
+  previews, and Windows command allowlist enforcement.
 
 ## Where To Make Changes
 

@@ -373,9 +373,11 @@ async fn hermes_action(
         tracing::warn!(error = %err, "failed to load Hermes action config");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    let controller = HermesRuntimeController::new(
+    let controller = HermesRuntimeController::with_wsl(
         config.control.hermes.agent_root,
         config.control.hermes.health_url,
+        config.control.wsl.distro,
+        config.control.wsl.default_user,
     );
     let action = format!("hermes::{:?}", request.action);
     let plan = controller.plan(request.action);
@@ -963,12 +965,53 @@ fn is_allowlisted_command(command: &CommandPreview) -> bool {
     match command.args.as_slice() {
         [arg] if arg == "--shutdown" => true,
         [terminate, distro] if terminate == "--terminate" => is_safe_identifier(distro),
-        [distribution, distro, user_flag, user, exec, command]
-            if distribution == "--distribution" && user_flag == "--user" && exec == "--exec" =>
-        {
-            is_safe_identifier(distro) && is_safe_identifier(user) && command == "true"
+        [
+            distribution,
+            distro,
+            user_flag,
+            user,
+            exec,
+            command_tail @ ..,
+        ] if distribution == "--distribution" && user_flag == "--user" && exec == "--exec" => {
+            is_safe_identifier(distro)
+                && is_safe_identifier(user)
+                && is_allowlisted_wsl_exec_tail(user, command_tail)
         }
         _ => false,
+    }
+}
+
+fn is_allowlisted_wsl_exec_tail(user: &str, command_tail: &[String]) -> bool {
+    match command_tail {
+        [command] if command == "true" => true,
+        [script] => is_allowlisted_hermes_script(user, script, &[]),
+        [script, timeout, mode] => {
+            is_allowlisted_hermes_script(user, script, &[timeout.as_str(), mode.as_str()])
+        }
+        _ => false,
+    }
+}
+
+fn is_allowlisted_hermes_script(user: &str, script: &str, args: &[&str]) -> bool {
+    let home = if user == "root" {
+        "/root".to_owned()
+    } else {
+        format!("/home/{user}")
+    };
+    let Some(script_name) = script.strip_prefix(&format!("{home}/Hermres/")) else {
+        return false;
+    };
+
+    if args.is_empty() {
+        matches!(
+            script_name,
+            "start-services.sh"
+                | "stop-services.sh"
+                | "restart-services.sh"
+                | "kill-stuck-services.sh"
+        )
+    } else {
+        script_name == "health-check.sh" && args == ["30", "ready"]
     }
 }
 

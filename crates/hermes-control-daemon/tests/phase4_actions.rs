@@ -95,6 +95,52 @@ async fn hermes_destructive_action_creates_confirmation_and_audit_preview() {
 }
 
 #[tokio::test]
+async fn hermes_restart_dry_run_returns_fixed_wsl_script_previews() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let response = post_json(
+        router,
+        "/v1/hermes/action",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase4-test"},
+            "action": "Restart",
+            "reason": "phase4 Hermes restart preview",
+            "dry_run": true
+        }),
+    )
+    .await;
+
+    assert_eq!(response["status"], "dry_run");
+    assert_eq!(response["risk"], "Destructive");
+    assert_eq!(response["commands"][0]["program"], "wsl.exe");
+    assert_eq!(
+        response["commands"][0]["args"],
+        json!([
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "hermes",
+            "--exec",
+            "/home/hermes/Hermres/restart-services.sh"
+        ])
+    );
+    assert_eq!(
+        response["commands"][1]["args"],
+        json!([
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "hermes",
+            "--exec",
+            "/home/hermes/Hermres/health-check.sh",
+            "30",
+            "ready"
+        ])
+    );
+}
+
+#[tokio::test]
 async fn pending_confirmation_locks_second_mutating_action_until_confirmed() {
     let fixture = Fixture::new();
     let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
@@ -235,7 +281,18 @@ async fn confirm_executes_pending_operation_through_injected_executor() {
     assert_eq!(operations.len(), 1);
     assert_eq!(operations[0].action, "hermes::Restart");
     assert_eq!(operations[0].requester_user_id, "phase4-test");
-    assert!(operations[0].commands.is_empty());
+    assert_eq!(operations[0].commands.len(), 2);
+    assert_eq!(
+        operations[0].commands[0].args,
+        [
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "hermes",
+            "--exec",
+            "/home/hermes/Hermres/restart-services.sh"
+        ]
+    );
     assert_eq!(
         operation_statuses(&fixture.state_db),
         vec!["completed".to_owned()]
@@ -356,7 +413,7 @@ fn windows_executor_runs_only_allowed_wsl_command_shapes() {
 
     let outcome = executor.execute(&operation);
 
-    assert_eq!(outcome.status, "completed");
+    assert_eq!(outcome.status, "completed", "{}", outcome.summary);
     assert_eq!(
         runner.commands.lock().expect("runner lock").clone(),
         operation.commands
@@ -399,6 +456,85 @@ fn windows_executor_rejects_unknown_wsl_argument_shapes() {
         requester_user_id: "phase4-test".to_owned(),
         summary: "Bad WSL command".to_owned(),
         commands: vec![command("wsl.exe", ["--exec", "rm", "-rf", "/"])],
+    };
+
+    let outcome = executor.execute(&operation);
+
+    assert_eq!(outcome.status, "failed");
+    assert!(outcome.summary.contains("not allowlisted"));
+    assert!(runner.commands.lock().expect("runner lock").is_empty());
+}
+
+#[test]
+fn windows_executor_allows_fixed_hermes_wsl_scripts() {
+    let runner = Arc::new(RecordingRunner::default());
+    let executor = WindowsCommandExecutor::new(runner.clone());
+    let operation = ExecutableOperation {
+        id: "op_test".to_owned(),
+        confirmation_id: "confirm_test".to_owned(),
+        action: "hermes::Restart".to_owned(),
+        requester_channel: "cli".to_owned(),
+        requester_user_id: "phase4-test".to_owned(),
+        summary: "Restart Hermes runtime".to_owned(),
+        commands: vec![
+            command(
+                "wsl.exe",
+                [
+                    "--distribution",
+                    "Ubuntu-Hermes-Codex",
+                    "--user",
+                    "hermes",
+                    "--exec",
+                    "/home/hermes/Hermres/restart-services.sh",
+                ],
+            ),
+            command(
+                "wsl.exe",
+                [
+                    "--distribution",
+                    "Ubuntu-Hermes-Codex",
+                    "--user",
+                    "hermes",
+                    "--exec",
+                    "/home/hermes/Hermres/health-check.sh",
+                    "30",
+                    "ready",
+                ],
+            ),
+        ],
+    };
+
+    let outcome = executor.execute(&operation);
+
+    assert_eq!(outcome.status, "completed", "{}", outcome.summary);
+    assert_eq!(
+        runner.commands.lock().expect("runner lock").clone(),
+        operation.commands
+    );
+}
+
+#[test]
+fn windows_executor_rejects_unknown_hermes_wsl_scripts() {
+    let runner = Arc::new(RecordingRunner::default());
+    let executor = WindowsCommandExecutor::new(runner.clone());
+    let operation = ExecutableOperation {
+        id: "op_test".to_owned(),
+        confirmation_id: "confirm_test".to_owned(),
+        action: "hermes::Bad".to_owned(),
+        requester_channel: "cli".to_owned(),
+        requester_user_id: "phase4-test".to_owned(),
+        summary: "Bad Hermes command".to_owned(),
+        commands: vec![command(
+            "wsl.exe",
+            [
+                "--distribution",
+                "Ubuntu-Hermes-Codex",
+                "--user",
+                "hermes",
+                "--exec",
+                "/home/hermes/Hermres/delete-everything.sh",
+            ],
+        )],
     };
 
     let outcome = executor.execute(&operation);

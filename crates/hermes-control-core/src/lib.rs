@@ -239,6 +239,8 @@ impl WslController {
 pub struct HermesRuntimeController {
     agent_root: String,
     health_url: String,
+    wsl_distro: Option<String>,
+    wsl_user: Option<String>,
 }
 
 impl HermesRuntimeController {
@@ -246,6 +248,22 @@ impl HermesRuntimeController {
         Self {
             agent_root: agent_root.into(),
             health_url: health_url.into(),
+            wsl_distro: None,
+            wsl_user: None,
+        }
+    }
+
+    pub fn with_wsl(
+        agent_root: impl Into<String>,
+        health_url: impl Into<String>,
+        wsl_distro: impl Into<String>,
+        wsl_user: impl Into<String>,
+    ) -> Self {
+        Self {
+            agent_root: agent_root.into(),
+            health_url: health_url.into(),
+            wsl_distro: Some(wsl_distro.into()),
+            wsl_user: Some(wsl_user.into()),
         }
     }
 
@@ -257,13 +275,13 @@ impl HermesRuntimeController {
                     "Wake Hermes runtime at {} and verify health at {}.",
                     self.agent_root, self.health_url
                 ),
-                commands: Vec::new(),
+                commands: self.hermes_commands(&["start-services.sh", "health-check.sh"]),
                 requires_confirmation: false,
             },
             HermesAction::Stop => OperationPlan {
                 risk: RiskLevel::Destructive,
                 summary: format!("Stop Hermes runtime at {}.", self.agent_root),
-                commands: Vec::new(),
+                commands: self.hermes_commands(&["stop-services.sh"]),
                 requires_confirmation: true,
             },
             HermesAction::Restart => OperationPlan {
@@ -272,7 +290,7 @@ impl HermesRuntimeController {
                     "Restart Hermes runtime at {} and verify health at {}.",
                     self.agent_root, self.health_url
                 ),
-                commands: Vec::new(),
+                commands: self.hermes_commands(&["restart-services.sh", "health-check.sh"]),
                 requires_confirmation: true,
             },
             HermesAction::Kill => OperationPlan {
@@ -281,10 +299,49 @@ impl HermesRuntimeController {
                     "Kill Hermes runtime at {}. Daemon and last-known-good route stay outside the runtime.",
                     self.agent_root
                 ),
-                commands: Vec::new(),
+                commands: self.hermes_commands(&["kill-stuck-services.sh"]),
                 requires_confirmation: true,
             },
         }
+    }
+
+    fn hermes_commands(&self, scripts: &[&str]) -> Vec<CommandPreview> {
+        let (Some(distro), Some(user)) = (&self.wsl_distro, &self.wsl_user) else {
+            return Vec::new();
+        };
+
+        scripts
+            .iter()
+            .map(|script| self.hermes_script_command(distro, user, script))
+            .collect()
+    }
+
+    fn hermes_script_command(&self, distro: &str, user: &str, script: &str) -> CommandPreview {
+        let mut args = vec![
+            "--distribution".to_owned(),
+            distro.to_owned(),
+            "--user".to_owned(),
+            user.to_owned(),
+            "--exec".to_owned(),
+            format!("{}/Hermres/{script}", wsl_home(user)),
+        ];
+        if script == "health-check.sh" {
+            args.extend(["30".to_owned(), "ready".to_owned()]);
+        }
+
+        FixedCommand {
+            program: FixedProgram::WslExe,
+            args,
+        }
+        .preview()
+    }
+}
+
+fn wsl_home(user: &str) -> String {
+    if user == "root" {
+        "/root".to_owned()
+    } else {
+        format!("/home/{user}")
     }
 }
 

@@ -171,3 +171,16 @@ unimplemented ideas here.
 - Added a daemon test proving failed execution is visible to clients, is stored
   as a failed operation, and releases the mutating operation lock for later
   retries.
+
+## 2026-05-02: Phase 4 Hermes fixed-script execution boundary added
+
+- `HermesRuntimeController` can now be constructed with WSL distro/user facts
+  and emits fixed WSL command previews for Hermes restart, stop, kill, wake, and
+  health-check steps.
+- The daemon `/v1/hermes/action` path now builds Hermes plans with configured
+  WSL facts, so confirmed destructive Hermes operations can reach the executor.
+- `WindowsCommandExecutor` allowlist now accepts only the fixed Hermes helper
+  scripts under the configured WSL user's `$HOME/Hermres` path and rejects
+  unknown script names.
+- Added core and daemon Phase 4 tests covering Hermes restart dry-run previews,
+  confirm-time command dispatch, and fixed-script allowlist behavior.
