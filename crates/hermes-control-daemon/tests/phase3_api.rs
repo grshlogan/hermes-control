@@ -181,7 +181,7 @@ mode = "latency"
 max_model_len = 90000
 speculative_method = "mtp"
 num_speculative_tokens = 2
-start = { kind = "wsl_script", script = "/mnt/e/WSL/vLLM/scripts/serve-qwen36-mtp.sh" }
+start = { kind = "wsl_script", script = "/mnt/e/WSL/vLLM/scripts/start-qwen36-mtp.sh" }
 stop = { kind = "process_match", served_model_name = "qwen36-mtp" }
 profiles = ["vllm.qwen36-mtp"]
 "#,

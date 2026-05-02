@@ -18,6 +18,12 @@ fi
 : "${HERMES_PID_DIR:=/run/hermes-control}"
 : "${HERMES_PID_FILE:=${HERMES_PID_DIR}/hermes-gateway.pid}"
 : "${HERMES_ENV_FILE:=${HOME}/.hermes/.env}"
+: "${VLLM_WORKSPACE:=/mnt/e/WSL/vLLM}"
+: "${VLLM_MODELS_ENDPOINT:=http://127.0.0.1:18080/v1/models}"
+: "${VLLM_LOG_DIR:=${VLLM_WORKSPACE}/logs}"
+: "${VLLM_PID_DIR:=/run/hermes-control}"
+: "${VLLM_START_QWEN36_MTP:=${VLLM_WORKSPACE}/scripts/start-qwen36-mtp.sh}"
+: "${VLLM_START_QWEN36_AWQ_INT4:=${VLLM_WORKSPACE}/scripts/start-qwen36-int4-eager.sh}"
 
 hc_require_root() {
   if [[ "$(id -u)" != "0" ]]; then
@@ -27,7 +33,7 @@ hc_require_root() {
 }
 
 hc_prepare_dirs() {
-  mkdir -p "$HERMES_LOG_DIR" "$HERMES_PID_DIR"
+  mkdir -p "$HERMES_LOG_DIR" "$HERMES_PID_DIR" "$VLLM_LOG_DIR" "$VLLM_PID_DIR"
 }
 
 hc_load_hermes_env() {
@@ -128,4 +134,98 @@ hc_fail() {
   local detail="$1"
   hc_status_json "error" "$detail" >&2
   exit 1
+}
+
+hc_vllm_served_model_for_variant() {
+  case "${1:-}" in
+    qwen36-mtp) printf '%s\n' "qwen36-mtp" ;;
+    qwen36-awq-int4) printf '%s\n' "qwen36-awq-int4" ;;
+    *) return 1 ;;
+  esac
+}
+
+hc_vllm_start_script_for_variant() {
+  case "${1:-}" in
+    qwen36-mtp) printf '%s\n' "$VLLM_START_QWEN36_MTP" ;;
+    qwen36-awq-int4) printf '%s\n' "$VLLM_START_QWEN36_AWQ_INT4" ;;
+    *) return 1 ;;
+  esac
+}
+
+hc_vllm_health_ok() {
+  local served_model_name="$1"
+  local body
+  body="$(curl -fsS --max-time "${VLLM_HEALTH_CURL_TIMEOUT_SECONDS:-1}" "$VLLM_MODELS_ENDPOINT" 2>/dev/null)" || return 1
+  printf '%s' "$body" | python3 - "$served_model_name" <<'PY'
+import json
+import sys
+
+served_model_name = sys.argv[1]
+try:
+    payload = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+
+for item in payload.get("data", []):
+    if item.get("id") == served_model_name:
+        sys.exit(0)
+sys.exit(1)
+PY
+}
+
+hc_vllm_find_pids() {
+  local served_model_name="$1"
+  python3 - "$served_model_name" <<'PY'
+import os
+import sys
+
+served_model_name = sys.argv[1]
+self_pids = {os.getpid(), os.getppid()}
+pids = set()
+
+for entry in os.listdir("/proc"):
+    if not entry.isdigit():
+        continue
+    pid = int(entry)
+    if pid in self_pids:
+        continue
+    try:
+        with open(f"/proc/{entry}/cmdline", "rb") as handle:
+            cmdline = handle.read().replace(b"\0", b" ").decode("utf-8", "ignore").strip()
+    except OSError:
+        continue
+    if served_model_name in cmdline and ("vllm" in cmdline or "serve-openai" in cmdline):
+        pids.add(pid)
+
+for pid in sorted(pids):
+    print(pid)
+PY
+}
+
+hc_vllm_json() {
+  local state="$1"
+  local detail="${2:-}"
+  local served_model_name="${3:-}"
+  local ready="false"
+  if [[ -n "$served_model_name" ]] && hc_vllm_health_ok "$served_model_name"; then
+    ready="true"
+  fi
+
+  VLLM_CONTROL_STATE="$state" \
+  VLLM_CONTROL_DETAIL="$detail" \
+  VLLM_SERVED_MODEL_NAME="$served_model_name" \
+  VLLM_MODELS_ENDPOINT="$VLLM_MODELS_ENDPOINT" \
+  VLLM_READY="$ready" \
+  python3 - <<'PY'
+import json
+import os
+
+print(json.dumps({
+    "state": os.environ["VLLM_CONTROL_STATE"],
+    "detail": os.environ.get("VLLM_CONTROL_DETAIL", ""),
+    "served_model_name": os.environ.get("VLLM_SERVED_MODEL_NAME", ""),
+    "models_endpoint": os.environ["VLLM_MODELS_ENDPOINT"],
+    "ready": os.environ["VLLM_READY"] == "true",
+}, sort_keys=True))
+PY
 }

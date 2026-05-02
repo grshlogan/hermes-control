@@ -99,6 +99,38 @@ async fn confirm_posts_code_to_daemon_confirmation_endpoint() {
     assert!(rendered.contains("completed"));
 }
 
+#[tokio::test]
+async fn model_start_posts_typed_action_to_daemon() {
+    let server = OneShotHttpServer::new(
+        r#"{"status":"dry_run","risk":"NormalMutating","summary":"Start vLLM model qwen36-mtp","dry_run":true,"commands":[]}"#,
+    );
+    let url = server.url();
+    let cli = Cli::try_parse_from([
+        "hermes-control",
+        "--daemon-url",
+        &url,
+        "--api-token",
+        "phase5-cli-token",
+        "model",
+        "start",
+        "qwen36-mtp",
+        "--dry-run",
+        "--reason",
+        "phase5 CLI smoke",
+    ])
+    .expect("CLI args should parse");
+
+    let rendered = run_cli(cli).await.expect("CLI command should run");
+    let request = server.join();
+
+    assert!(request.starts_with("POST /v1/models/qwen36-mtp/action HTTP/1.1"));
+    assert!(request.contains(r#""action":"Start""#));
+    assert!(request.contains(r#""reason":"phase5 CLI smoke""#));
+    assert!(request.contains(r#""dry_run":true"#));
+    assert!(rendered.contains("dry_run"));
+    assert!(rendered.contains("Start vLLM model qwen36-mtp"));
+}
+
 struct OneShotHttpServer {
     address: String,
     handle: thread::JoinHandle<String>,

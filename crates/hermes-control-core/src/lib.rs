@@ -6,9 +6,9 @@ use std::{
 };
 
 use hermes_control_types::{
-    CommandPreview, ControlConfig, EndpointStatus, HealthStatus, HermesAction, ModelRuntimeSummary,
-    ModelRuntimesConfig, ProvidersConfig, ReadOnlyStatus, RiskLevel, StateSummary, WslAction,
-    WslDistroStatus,
+    CommandPreview, ControlConfig, EndpointStatus, HealthStatus, HermesAction, ModelAction,
+    ModelRuntimeConfig, ModelRuntimeSummary, ModelRuntimeVariant, ModelRuntimesConfig,
+    ProvidersConfig, ReadOnlyStatus, RiskLevel, StateSummary, WslAction, WslDistroStatus,
 };
 use serde_json::Value;
 use thiserror::Error;
@@ -249,6 +249,11 @@ const HERMES_CONTROL_STOP_SCRIPT: &str = "hermes-control-stop.sh";
 const HERMES_CONTROL_RESTART_SCRIPT: &str = "hermes-control-restart.sh";
 const HERMES_CONTROL_KILL_SCRIPT: &str = "hermes-control-kill.sh";
 const HERMES_CONTROL_HEALTH_SCRIPT: &str = "hermes-control-health.sh";
+const HERMES_CONTROL_VLLM_START_SCRIPT: &str = "hermes-control-vllm-start.sh";
+const HERMES_CONTROL_VLLM_STOP_SCRIPT: &str = "hermes-control-vllm-stop.sh";
+const HERMES_CONTROL_VLLM_HEALTH_SCRIPT: &str = "hermes-control-vllm-health.sh";
+const HERMES_CONTROL_VLLM_LOGS_SCRIPT: &str = "hermes-control-vllm-logs.sh";
+const HERMES_CONTROL_VLLM_BENCHMARK_SCRIPT: &str = "hermes-control-vllm-benchmark.sh";
 
 impl HermesRuntimeController {
     pub fn new(agent_root: impl Into<String>, health_url: impl Into<String>) -> Self {
@@ -339,6 +344,162 @@ impl HermesRuntimeController {
         if script == HERMES_CONTROL_HEALTH_SCRIPT {
             args.extend(["30".to_owned(), "ready".to_owned()]);
         }
+
+        FixedCommand {
+            program: FixedProgram::WslExe,
+            args,
+        }
+        .preview()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelRuntimeController<'a> {
+    model_runtimes: &'a ModelRuntimesConfig,
+    wsl_user: String,
+}
+
+impl<'a> ModelRuntimeController<'a> {
+    pub fn new(model_runtimes: &'a ModelRuntimesConfig, wsl_user: impl Into<String>) -> Self {
+        Self {
+            model_runtimes,
+            wsl_user: wsl_user.into(),
+        }
+    }
+
+    pub fn plan(&self, model_id: &str, action: ModelAction) -> Option<OperationPlan> {
+        let (runtime, variant) = self.find_variant(model_id)?;
+        let variant_id = variant.id.as_str();
+        let served_model_name = variant.served_model_name.as_str();
+
+        Some(match action {
+            ModelAction::Start => OperationPlan {
+                risk: RiskLevel::NormalMutating,
+                summary: format!(
+                    "Start vLLM model {variant_id} on {} and wait for {} at {}.",
+                    runtime.wsl_distro, served_model_name, runtime.models_endpoint
+                ),
+                commands: vec![
+                    self.vllm_command(
+                        &runtime.wsl_distro,
+                        HERMES_CONTROL_VLLM_START_SCRIPT,
+                        &[variant_id],
+                    ),
+                    self.vllm_command(
+                        &runtime.wsl_distro,
+                        HERMES_CONTROL_VLLM_HEALTH_SCRIPT,
+                        &[served_model_name, "180", "ready"],
+                    ),
+                ],
+                requires_confirmation: false,
+            },
+            ModelAction::Stop => OperationPlan {
+                risk: RiskLevel::Destructive,
+                summary: format!("Stop vLLM model {served_model_name}."),
+                commands: vec![self.vllm_command(
+                    &runtime.wsl_distro,
+                    HERMES_CONTROL_VLLM_STOP_SCRIPT,
+                    &[served_model_name],
+                )],
+                requires_confirmation: true,
+            },
+            ModelAction::Restart => OperationPlan {
+                risk: RiskLevel::Destructive,
+                summary: format!(
+                    "Restart vLLM model {variant_id} and wait for {served_model_name} at {}.",
+                    runtime.models_endpoint
+                ),
+                commands: vec![
+                    self.vllm_command(
+                        &runtime.wsl_distro,
+                        HERMES_CONTROL_VLLM_STOP_SCRIPT,
+                        &[served_model_name],
+                    ),
+                    self.vllm_command(
+                        &runtime.wsl_distro,
+                        HERMES_CONTROL_VLLM_START_SCRIPT,
+                        &[variant_id],
+                    ),
+                    self.vllm_command(
+                        &runtime.wsl_distro,
+                        HERMES_CONTROL_VLLM_HEALTH_SCRIPT,
+                        &[served_model_name, "180", "ready"],
+                    ),
+                ],
+                requires_confirmation: true,
+            },
+            ModelAction::Health => OperationPlan {
+                risk: RiskLevel::ReadOnly,
+                summary: format!("Check vLLM model {served_model_name} readiness."),
+                commands: vec![self.vllm_command(
+                    &runtime.wsl_distro,
+                    HERMES_CONTROL_VLLM_HEALTH_SCRIPT,
+                    &[served_model_name, "10", "ready"],
+                )],
+                requires_confirmation: false,
+            },
+            ModelAction::Logs => OperationPlan {
+                risk: RiskLevel::ReadOnly,
+                summary: format!("Tail vLLM logs for {variant_id}."),
+                commands: vec![self.vllm_command(
+                    &runtime.wsl_distro,
+                    HERMES_CONTROL_VLLM_LOGS_SCRIPT,
+                    &[variant_id, "200"],
+                )],
+                requires_confirmation: false,
+            },
+            ModelAction::Benchmark => OperationPlan {
+                risk: RiskLevel::Experimental,
+                summary: format!("Run controlled vLLM benchmark for {variant_id}."),
+                commands: vec![self.vllm_command(
+                    &runtime.wsl_distro,
+                    HERMES_CONTROL_VLLM_BENCHMARK_SCRIPT,
+                    &[variant_id],
+                )],
+                requires_confirmation: true,
+            },
+        })
+    }
+
+    fn find_variant(
+        &self,
+        model_id: &str,
+    ) -> Option<(&'a ModelRuntimeConfig, &'a ModelRuntimeVariant)> {
+        let served_match = self
+            .model_runtimes
+            .runtimes
+            .iter()
+            .flat_map(|runtime| {
+                runtime
+                    .variants
+                    .iter()
+                    .map(move |variant| (runtime, variant))
+            })
+            .find(|(_, variant)| variant.served_model_name == model_id);
+
+        self.model_runtimes
+            .runtimes
+            .iter()
+            .flat_map(|runtime| {
+                runtime
+                    .variants
+                    .iter()
+                    .map(move |variant| (runtime, variant))
+            })
+            .find(|(_, variant)| variant.id == model_id)
+            .or(served_match)
+    }
+
+    fn vllm_command(&self, distro: &str, script: &str, script_args: &[&str]) -> CommandPreview {
+        let mut args = vec![
+            "--distribution".to_owned(),
+            distro.to_owned(),
+            "--user".to_owned(),
+            self.wsl_user.clone(),
+            "--exec".to_owned(),
+            format!("{HERMES_CONTROL_WSL_BIN}/{script}"),
+        ];
+        args.extend(script_args.iter().map(|arg| (*arg).to_owned()));
 
         FixedCommand {
             program: FixedProgram::WslExe,

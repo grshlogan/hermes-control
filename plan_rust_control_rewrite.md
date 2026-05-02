@@ -384,7 +384,7 @@ id = "qwen36-awq-int4"
 served_model_name = "qwen36-awq-int4"
 mode = "stable"
 max_model_len = 90000
-start = { kind = "wsl_script", script = "/mnt/e/WSL/vLLM/scripts/serve-qwen36-awq-int4.sh" }
+start = { kind = "wsl_script", script = "/mnt/e/WSL/vLLM/scripts/start-qwen36-int4-eager.sh" }
 stop = { kind = "process_match", served_model_name = "qwen36-awq-int4" }
 profiles = ["vllm.qwen36-awq-int4"]
 
@@ -395,7 +395,7 @@ mode = "latency"
 max_model_len = 90000
 speculative_method = "mtp"
 num_speculative_tokens = 2
-start = { kind = "wsl_script", script = "/mnt/e/WSL/vLLM/scripts/serve-qwen36-mtp.sh" }
+start = { kind = "wsl_script", script = "/mnt/e/WSL/vLLM/scripts/start-qwen36-mtp.sh" }
 stop = { kind = "process_match", served_model_name = "qwen36-mtp" }
 profiles = ["vllm.qwen36-mtp"]
 
@@ -975,6 +975,13 @@ Codex tasks:
 - Implement `/v1/models` readiness polling.
 - Implement failed-start cleanup.
 - Implement benchmark action.
+
+Initial status as of 2026-05-02:
+
+- Typed vLLM operation planning, daemon model action route, CLI model action
+  calls, and canonical WSL root vLLM helper scripts have landed as the first
+  Phase 5 increment.
+- Benchmark helper is intentionally reserved until benchmark persistence lands.
 
 Completion signal:
 

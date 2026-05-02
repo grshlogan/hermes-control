@@ -223,3 +223,15 @@ unimplemented ideas here.
 - Smoke-tested CLI -> daemon -> WSL root helper execution with a confirmed
   Hermes restart; execution completed and Hermes health returned ready on
   `http://127.0.0.1:8642/health`.
+
+## 2026-05-02: Phase 5 vLLM action planning started
+
+- Added `ModelRuntimeController` with typed vLLM start/stop/restart/health/logs
+  /benchmark operation plans.
+- Added daemon `/v1/models/{model_id}/action` and `/v1/models/{model_id}` route
+  support for model-specific control.
+- Added CLI `model <start|stop|restart|health|benchmark>` daemon calls.
+- Added canonical WSL root vLLM helpers under `/opt/hermes-control/bin` and
+  installed them into the current WSL distro.
+- Corrected static vLLM start script facts to current existing scripts:
+  `start-qwen36-mtp.sh` and `start-qwen36-int4-eager.sh`.

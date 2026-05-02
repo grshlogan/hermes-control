@@ -4,8 +4,8 @@ use clap::{Args, CommandFactory, Parser, Subcommand};
 use hermes_control_core::{collect_read_only_status, load_config_dir};
 use hermes_control_types::{
     ActionRequest, CancelRequest, ConfirmRequest, ConfirmationLifecycleResponse, EndpointStatus,
-    HermesAction, ModelRuntimeSummary, OperationResponse, ProviderConfig, ReadOnlyStatus,
-    Requester, RequesterChannel, WslAction,
+    HermesAction, ModelAction, ModelRuntimeSummary, OperationResponse, ProviderConfig,
+    ReadOnlyStatus, Requester, RequesterChannel, WslAction,
 };
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -79,6 +79,16 @@ pub enum ModelCommand {
     Status { model_id: String },
     #[command(about = "Tail model runtime logs")]
     Logs { model_id: String },
+    #[command(about = "Start a local model runtime through the daemon")]
+    Start(ModelActionArgs),
+    #[command(about = "Stop a local model runtime through the daemon")]
+    Stop(ModelActionArgs),
+    #[command(about = "Restart a local model runtime through the daemon")]
+    Restart(ModelActionArgs),
+    #[command(about = "Check model readiness through the daemon")]
+    Health(ModelActionArgs),
+    #[command(about = "Run a controlled model benchmark through the daemon")]
+    Benchmark(ModelActionArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -118,6 +128,14 @@ pub struct ActionOptions {
         help = "Operator reason for audit"
     )]
     pub reason: String,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ModelActionArgs {
+    pub model_id: String,
+
+    #[command(flatten)]
+    pub options: ActionOptions,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,6 +185,21 @@ pub async fn run_cli(cli: Cli) -> anyhow::Result<String> {
         Some(Command::Model(ModelCommand::Logs { model_id })) => Ok(format!(
             "Model logs for {model_id}: log tailing by model id lands in Phase 5"
         )),
+        Some(Command::Model(command)) => {
+            let (model_id, action, options) = model_action(command);
+            let response = daemon
+                .post_json::<_, OperationResponse>(
+                    &format!("/v1/models/{model_id}/action"),
+                    &ActionRequest {
+                        requester: cli_requester(),
+                        action,
+                        reason: options.reason,
+                        dry_run: options.dry_run,
+                    },
+                )
+                .await?;
+            render_operation_response(&response, format)
+        }
         Some(Command::Hermes(command)) => {
             let (action, options) = hermes_action(command);
             let response = daemon
@@ -460,6 +493,19 @@ fn hermes_action(command: HermesCommand) -> (HermesAction, ActionOptions) {
         HermesCommand::Stop(options) => (HermesAction::Stop, options),
         HermesCommand::Restart(options) => (HermesAction::Restart, options),
         HermesCommand::Kill(options) => (HermesAction::Kill, options),
+    }
+}
+
+fn model_action(command: ModelCommand) -> (String, ModelAction, ActionOptions) {
+    match command {
+        ModelCommand::Start(args) => (args.model_id, ModelAction::Start, args.options),
+        ModelCommand::Stop(args) => (args.model_id, ModelAction::Stop, args.options),
+        ModelCommand::Restart(args) => (args.model_id, ModelAction::Restart, args.options),
+        ModelCommand::Health(args) => (args.model_id, ModelAction::Health, args.options),
+        ModelCommand::Benchmark(args) => (args.model_id, ModelAction::Benchmark, args.options),
+        ModelCommand::Status { .. } | ModelCommand::Logs { .. } => {
+            unreachable!("read-only model commands are handled before action mapping")
+        }
     }
 }
 

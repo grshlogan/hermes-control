@@ -141,6 +141,80 @@ async fn hermes_restart_dry_run_returns_fixed_wsl_script_previews() {
 }
 
 #[tokio::test]
+async fn model_start_dry_run_returns_fixed_vllm_script_previews() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let response = post_json(
+        router,
+        "/v1/models/qwen36-mtp/action",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase5-test"},
+            "action": "Start",
+            "reason": "phase5 model start preview",
+            "dry_run": true
+        }),
+    )
+    .await;
+
+    assert_eq!(response["status"], "dry_run");
+    assert_eq!(response["risk"], "NormalMutating");
+    assert_eq!(
+        response["commands"][0]["args"],
+        json!([
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "root",
+            "--exec",
+            "/opt/hermes-control/bin/hermes-control-vllm-start.sh",
+            "qwen36-mtp"
+        ])
+    );
+    assert_eq!(
+        response["commands"][1]["args"],
+        json!([
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "root",
+            "--exec",
+            "/opt/hermes-control/bin/hermes-control-vllm-health.sh",
+            "qwen36-mtp",
+            "180",
+            "ready"
+        ])
+    );
+}
+
+#[tokio::test]
+async fn model_stop_creates_confirmation() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let response = post_json(
+        router,
+        "/v1/models/qwen36-mtp/action",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase5-test"},
+            "action": "Stop",
+            "reason": "phase5 model stop",
+            "dry_run": false
+        }),
+    )
+    .await;
+
+    assert_eq!(response["status"], "confirmation_required");
+    assert_eq!(response["risk"], "Destructive");
+    assert!(
+        response["summary"]
+            .as_str()
+            .unwrap()
+            .contains("Stop vLLM model qwen36-mtp")
+    );
+}
+
+#[tokio::test]
 async fn normal_mutating_action_executes_immediately_without_confirmation() {
     let fixture = Fixture::new();
     let executor = Arc::new(RecordingExecutor::default());
@@ -549,6 +623,57 @@ fn windows_executor_allows_fixed_hermes_wsl_scripts() {
 }
 
 #[test]
+fn windows_executor_allows_fixed_vllm_wsl_scripts() {
+    let runner = Arc::new(RecordingRunner::default());
+    let executor = WindowsCommandExecutor::new(runner.clone());
+    let operation = ExecutableOperation {
+        id: "op_test".to_owned(),
+        confirmation_id: "confirm_test".to_owned(),
+        action: "model::qwen36-mtp::Start".to_owned(),
+        requester_channel: "cli".to_owned(),
+        requester_user_id: "phase5-test".to_owned(),
+        summary: "Start vLLM model".to_owned(),
+        commands: vec![
+            command(
+                "wsl.exe",
+                [
+                    "--distribution",
+                    "Ubuntu-Hermes-Codex",
+                    "--user",
+                    "root",
+                    "--exec",
+                    "/opt/hermes-control/bin/hermes-control-vllm-start.sh",
+                    "qwen36-mtp",
+                ],
+            ),
+            command(
+                "wsl.exe",
+                [
+                    "--distribution",
+                    "Ubuntu-Hermes-Codex",
+                    "--user",
+                    "root",
+                    "--exec",
+                    "/opt/hermes-control/bin/hermes-control-vllm-health.sh",
+                    "qwen36-mtp",
+                    "180",
+                    "ready",
+                ],
+            ),
+        ],
+    };
+
+    let outcome = executor.execute(&operation);
+
+    assert_eq!(outcome.status, "completed", "{}", outcome.summary);
+    assert_eq!(
+        runner.commands.lock().expect("runner lock").len(),
+        2,
+        "both vLLM commands should run"
+    );
+}
+
+#[test]
 fn windows_executor_rejects_unknown_hermes_wsl_scripts() {
     let runner = Arc::new(RecordingRunner::default());
     let executor = WindowsCommandExecutor::new(runner.clone());
@@ -748,7 +873,7 @@ mode = "latency"
 max_model_len = 90000
 speculative_method = "mtp"
 num_speculative_tokens = 2
-start = { kind = "wsl_script", script = "/mnt/e/WSL/vLLM/scripts/serve-qwen36-mtp.sh" }
+start = { kind = "wsl_script", script = "/mnt/e/WSL/vLLM/scripts/start-qwen36-mtp.sh" }
 stop = { kind = "process_match", served_model_name = "qwen36-mtp" }
 profiles = ["vllm.qwen36-mtp"]
 "#,

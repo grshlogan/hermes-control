@@ -50,8 +50,27 @@ HERMES_LOG_DIR=/root/Hermres/logs
 HERMES_PID_DIR=/run/hermes-control
 HERMES_PID_FILE=/run/hermes-control/hermes-gateway.pid
 HERMES_ENV_FILE=/root/.hermes/.env
+VLLM_WORKSPACE=/mnt/e/WSL/vLLM
+VLLM_MODELS_ENDPOINT=http://127.0.0.1:18080/v1/models
+VLLM_LOG_DIR=/mnt/e/WSL/vLLM/logs
+VLLM_PID_DIR=/run/hermes-control
+VLLM_START_QWEN36_MTP=/mnt/e/WSL/vLLM/scripts/start-qwen36-mtp.sh
+VLLM_START_QWEN36_AWQ_INT4=/mnt/e/WSL/vLLM/scripts/start-qwen36-int4-eager.sh
 ENV
   chmod 0644 "$RUNTIME_ENV"
+fi
+
+if ! grep -q '^VLLM_WORKSPACE=' "$RUNTIME_ENV"; then
+  cat >> "$RUNTIME_ENV" <<'ENV'
+
+# vLLM runtime defaults added by Hermes Control Phase 5.
+VLLM_WORKSPACE=/mnt/e/WSL/vLLM
+VLLM_MODELS_ENDPOINT=http://127.0.0.1:18080/v1/models
+VLLM_LOG_DIR=/mnt/e/WSL/vLLM/logs
+VLLM_PID_DIR=/run/hermes-control
+VLLM_START_QWEN36_MTP=/mnt/e/WSL/vLLM/scripts/start-qwen36-mtp.sh
+VLLM_START_QWEN36_AWQ_INT4=/mnt/e/WSL/vLLM/scripts/start-qwen36-int4-eager.sh
+ENV
 fi
 
 echo "Installed Hermes Control WSL helpers to ${INSTALL_PREFIX}/bin"

@@ -21,6 +21,11 @@ fn wsl_root_install_assets_define_canonical_helper_contract() {
         "hermes-control-kill.sh",
         "hermes-control-health.sh",
         "hermes-control-status.sh",
+        "hermes-control-vllm-start.sh",
+        "hermes-control-vllm-stop.sh",
+        "hermes-control-vllm-health.sh",
+        "hermes-control-vllm-logs.sh",
+        "hermes-control-vllm-benchmark.sh",
     ] {
         let path = bin.join(script);
         let contents = fs::read_to_string(&path).unwrap_or_else(|error| {

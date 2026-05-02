@@ -13,6 +13,9 @@ This map explains where to work in the Hermes Control Rust workspace.
   `http://127.0.0.1:8642/health`.
 - `config/providers.toml`: AI provider and route-source facts.
 - `config/model-runtimes.toml`: local vLLM runtime and variant facts.
+  Current machine facts: qwen36 MTP and AWQ variants run through WSL distro
+  `Ubuntu-Hermes-Codex` and expose `/v1/models` on
+  `http://127.0.0.1:18080`.
 - `docs/`: handoff notes, boundary docs, and change log.
 
 ## Crates
@@ -29,6 +32,8 @@ This map explains where to work in the Hermes Control Rust workspace.
   - Local read-only status collection.
   - WSL verbose-list parser and fixed `wsl.exe --list --verbose` command spec.
   - Phase 4 WSL/Hermes operation plan builders and dry-run command previews.
+  - Phase 5 vLLM model runtime operation planner for canonical
+    `/opt/hermes-control/bin/hermes-control-vllm-*.sh` helpers.
   - Hermes WSL root helper previews for `/opt/hermes-control/bin`
     `hermes-control-start.sh`, `hermes-control-stop.sh`,
     `hermes-control-restart.sh`, `hermes-control-kill.sh`, and
@@ -39,12 +44,15 @@ This map explains where to work in the Hermes Control Rust workspace.
 
 - `crates/hermes-control-daemon`
   - Axum daemon surface.
-  - Authenticated read-only routes for status, health, providers, models, active
-    route, and audit summaries.
+  - Authenticated read-only routes for status, health, providers, models,
+    individual model status, active route, and audit summaries.
   - SQLite state/audit initialization for active route, operation state,
     confirmations, and audit events.
   - WSL/Hermes action routes for dry-run previews and destructive-action
     confirmation records.
+  - Initial model action route:
+    `/v1/models/{model_id}/action` for typed vLLM start/stop/restart/health/logs
+    /benchmark plans.
   - Confirmation/cancel endpoints and pending operation lock.
   - Confirm responses expose executor outcome status, while failed outcomes are
     stored in operation state and release the lock.
@@ -64,6 +72,9 @@ This map explains where to work in the Hermes Control Rust workspace.
     `/etc/hermes-control/runtime.env`.
   - Helpers start, stop, restart, kill, health-check, and status-check the
     Hermes gateway without relying on legacy `/root/Hermres/*.sh` scripts.
+  - vLLM helpers start/stop/health/log/benchmark fixed model runtime operations
+    through the same root-side package. Benchmark is a reserved helper in this
+    first Phase 5 increment.
 
 - `crates/hermes-control-cli`
   - Clap command definitions and CLI rendering.
@@ -71,6 +82,8 @@ This map explains where to work in the Hermes Control Rust workspace.
   - Phase 4 mutating commands call daemon APIs with bearer auth:
     `hermes <wake|stop|restart|kill>`,
     `wsl <wake|stop|restart|shutdown-all>`, `confirm <code>`, and `cancel`.
+  - Phase 5 `model <start|stop|restart|health|benchmark>` commands call daemon
+    model action APIs.
 
 - `crates/hermes-control-bot`
   - Windows-hosted Teloxide subprocess.
@@ -94,6 +107,8 @@ This map explains where to work in the Hermes Control Rust workspace.
   contract.
 - `crates/hermes-control-core/tests/phase4_wsl_install_assets.rs`: WSL root
   helper install asset contract.
+- `crates/hermes-control-core/tests/phase5_model_runtime_plans.rs`: vLLM model
+  runtime operation-plan contract.
 - `crates/hermes-control-core/tests/read_only_core.rs`: WSL parser, vLLM model
   parsing, log tailing, and status behavior.
 - `crates/hermes-control-cli/tests/help_contract.rs`: CLI help contract.
@@ -112,8 +127,8 @@ This map explains where to work in the Hermes Control Rust workspace.
   responses, confirmation records, audit preview events, confirm/cancel, and
   operation-lock release behavior, plus injected executor dispatch after
   confirmation, failed execution outcome reporting, Hermes fixed-script
-  previews, immediate execution for normal mutating actions, and Windows command
-  allowlist enforcement.
+  previews, initial vLLM action previews, immediate execution for normal
+  mutating actions, and Windows command allowlist enforcement.
 
 ## Where To Make Changes
 

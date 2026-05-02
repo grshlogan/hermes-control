@@ -29,6 +29,19 @@ wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/
 
 No legacy `/root/Hermres/*.sh` script is part of the daemon allowlist.
 
+The daemon may also execute these vLLM helper shapes:
+
+```text
+wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-vllm-start.sh <variant-id>
+wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-vllm-stop.sh <served-model-name>
+wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-vllm-health.sh <served-model-name> <seconds> ready
+wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-vllm-logs.sh <variant-id> <line-count>
+wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-vllm-benchmark.sh <variant-id>
+```
+
+The first Phase 5 benchmark helper is intentionally reserved and exits with a
+clear message; real benchmark execution should land with benchmark storage.
+
 ## Source Layout
 
 ```text
@@ -42,6 +55,11 @@ scripts/wsl-root/
     hermes-control-kill.sh
     hermes-control-health.sh
     hermes-control-status.sh
+    hermes-control-vllm-start.sh
+    hermes-control-vllm-stop.sh
+    hermes-control-vllm-health.sh
+    hermes-control-vllm-logs.sh
+    hermes-control-vllm-benchmark.sh
 ```
 
 `install.sh` copies these files into `/opt/hermes-control/bin` and creates the
@@ -78,6 +96,11 @@ HERMES_HEALTH_URL=http://127.0.0.1:8642/health
 HERMES_LOG_DIR=/root/Hermres/logs
 HERMES_PID_FILE=/run/hermes-control/hermes-gateway.pid
 HERMES_ENV_FILE=/root/.hermes/.env
+VLLM_WORKSPACE=/mnt/e/WSL/vLLM
+VLLM_MODELS_ENDPOINT=http://127.0.0.1:18080/v1/models
+VLLM_LOG_DIR=/mnt/e/WSL/vLLM/logs
+VLLM_START_QWEN36_MTP=/mnt/e/WSL/vLLM/scripts/start-qwen36-mtp.sh
+VLLM_START_QWEN36_AWQ_INT4=/mnt/e/WSL/vLLM/scripts/start-qwen36-int4-eager.sh
 ```
 
 On a fresh machine, set these paths to the actual Hermes installation before
@@ -100,3 +123,9 @@ wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-con
 
 The status and health helpers emit JSON. The daemon does not depend on legacy
 process probes such as `service-status.sh`.
+
+Check vLLM readiness without starting a model:
+
+```powershell
+wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-vllm-health.sh qwen36-mtp 1 ready
+```

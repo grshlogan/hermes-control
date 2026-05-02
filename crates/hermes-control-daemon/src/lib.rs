@@ -9,19 +9,19 @@ use std::{
 
 use axum::{
     Json, Router,
-    extract::{Query, State},
+    extract::{Path as AxumPath, Query, State},
     http::{HeaderMap, StatusCode, header::AUTHORIZATION},
     routing::{get, post},
 };
 use hermes_control_core::{
-    ConfigError, HermesRuntimeController, OperationPlan, WslController, collect_read_only_status,
-    load_config_dir,
+    ConfigError, HermesRuntimeController, ModelRuntimeController, OperationPlan, WslController,
+    collect_read_only_status, load_config_dir,
 };
 use hermes_control_types::{
     ActionRequest, ActiveRouteStatus, AuditEventSummary, CancelRequest, CommandPreview,
-    ConfirmRequest, ConfirmationLifecycleResponse, HealthStatus, HermesAction, ModelRuntimeSummary,
-    OperationResponse, ProviderConfig, ReadOnlyStatus, Requester, RequesterChannel, RiskLevel,
-    WslAction,
+    ConfirmRequest, ConfirmationLifecycleResponse, HealthStatus, HermesAction, ModelAction,
+    ModelRuntimeSummary, OperationResponse, ProviderConfig, ReadOnlyStatus, Requester,
+    RequesterChannel, RiskLevel, WslAction,
 };
 use rusqlite::{Connection, OptionalExtension};
 use thiserror::Error;
@@ -228,6 +228,8 @@ pub fn build_router_with_executor(
         .route("/v1/health", get(health))
         .route("/v1/providers", get(providers))
         .route("/v1/models", get(models))
+        .route("/v1/models/{model_id}", get(model_status))
+        .route("/v1/models/{model_id}/action", post(model_action))
         .route("/v1/route/active", get(active_route))
         .route("/v1/audit", get(audit_events))
         .route("/v1/wsl/status", get(wsl_status))
@@ -286,6 +288,26 @@ async fn models(
             tracing::warn!(error = %err, "failed to collect model status");
             StatusCode::INTERNAL_SERVER_ERROR
         })
+}
+
+async fn model_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(model_id): AxumPath<String>,
+) -> ApiResult<ModelRuntimeSummary> {
+    require_auth(&state, &headers)?;
+    let status = collect_read_only_status(&*state.config_dir)
+        .await
+        .map_err(|err| {
+            tracing::warn!(error = %err, "failed to collect model status");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    status
+        .models
+        .into_iter()
+        .find(|model| model.variant_id == model_id || model.served_model_name == model_id)
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
 }
 
 async fn active_route(
@@ -382,6 +404,33 @@ async fn hermes_action(
     let action = format!("hermes::{:?}", request.action);
     let plan = controller.plan(request.action);
     operation_response(&state, request.requester, action, request.dry_run, plan).map(Json)
+}
+
+async fn model_action(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(model_id): AxumPath<String>,
+    Json(request): Json<ActionRequest<ModelAction>>,
+) -> ApiResult<OperationResponse> {
+    require_auth(&state, &headers)?;
+    let config = load_config_dir(&*state.config_dir).map_err(|err| {
+        tracing::warn!(error = %err, "failed to load model action config");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let controller =
+        ModelRuntimeController::new(&config.model_runtimes, config.control.wsl.default_user);
+    let action_label = format!("model::{model_id}::{:?}", request.action);
+    let plan = controller
+        .plan(&model_id, request.action)
+        .ok_or(StatusCode::NOT_FOUND)?;
+    operation_response(
+        &state,
+        request.requester,
+        action_label,
+        request.dry_run,
+        plan,
+    )
+    .map(Json)
 }
 
 fn operation_response(
@@ -1044,15 +1093,15 @@ fn is_allowlisted_command(command: &CommandPreview) -> bool {
 fn is_allowlisted_wsl_exec_tail(user: &str, command_tail: &[String]) -> bool {
     match command_tail {
         [command] if command == "true" => true,
-        [script] => is_allowlisted_hermes_script(user, script, &[]),
-        [script, timeout, mode] => {
-            is_allowlisted_hermes_script(user, script, &[timeout.as_str(), mode.as_str()])
+        [script, args @ ..] => {
+            is_allowlisted_hermes_script(user, script, args)
+                || is_allowlisted_vllm_script(user, script, args)
         }
         _ => false,
     }
 }
 
-fn is_allowlisted_hermes_script(user: &str, script: &str, args: &[&str]) -> bool {
+fn is_allowlisted_hermes_script(user: &str, script: &str, args: &[String]) -> bool {
     if user != "root" {
         return false;
     }
@@ -1071,6 +1120,31 @@ fn is_allowlisted_hermes_script(user: &str, script: &str, args: &[&str]) -> bool
         )
     } else {
         script_name == "hermes-control-health.sh" && args == ["30", "ready"]
+    }
+}
+
+fn is_allowlisted_vllm_script(user: &str, script: &str, args: &[String]) -> bool {
+    if user != "root" {
+        return false;
+    }
+
+    let Some(script_name) = script.strip_prefix("/opt/hermes-control/bin/") else {
+        return false;
+    };
+
+    match (script_name, args) {
+        ("hermes-control-vllm-start.sh", [variant]) => is_safe_identifier(variant),
+        ("hermes-control-vllm-stop.sh", [served_model]) => is_safe_identifier(served_model),
+        ("hermes-control-vllm-health.sh", [served_model, timeout, mode]) => {
+            is_safe_identifier(served_model)
+                && timeout.chars().all(|ch| ch.is_ascii_digit())
+                && mode == "ready"
+        }
+        ("hermes-control-vllm-logs.sh", [variant, line_count]) => {
+            is_safe_identifier(variant) && line_count.chars().all(|ch| ch.is_ascii_digit())
+        }
+        ("hermes-control-vllm-benchmark.sh", [variant]) => is_safe_identifier(variant),
+        _ => false,
     }
 }
 

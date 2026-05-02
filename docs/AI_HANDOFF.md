@@ -7,7 +7,7 @@ destructive-action confirmation records, confirm/cancel endpoints, and a pending
 operation lock. Confirmed operations now flow through an injectable executor
 abstraction. The daemon binary wires an allowlisted Windows command executor for
 confirmed operations; library/test router defaults can still use no-op or fake
-executors.
+executors. Phase 5 has started with initial vLLM runtime action planning.
 
 ## Phase Report
 
@@ -39,7 +39,7 @@ Phase 3 has started:
 - Initial state tables cover active route, operation state, and confirmations.
 - Initial audit table covers append-only audit event summaries.
 
-Phase 4 has started:
+Phase 4 is complete:
 
 - `hermes-control-core` exposes `WslController` and `HermesRuntimeController`
   plan builders.
@@ -77,6 +77,22 @@ Phase 4 has started:
 - Failed executor outcomes are stored as `failed` operation state and release
   the pending operation lock for a later retry.
 
+Phase 5 has started:
+
+- `ModelRuntimeController` builds typed vLLM operation plans from
+  `config/model-runtimes.toml`.
+- Model `Start` emits canonical WSL root helper commands for
+  `hermes-control-vllm-start.sh <variant>` plus
+  `hermes-control-vllm-health.sh <served-model> 180 ready`.
+- Model `Stop` and `Restart` require confirmation; `Benchmark` is marked
+  experimental and reserved for a later Phase 5 increment.
+- Daemon route `/v1/models/{model_id}/action` accepts typed `ModelAction`
+  requests and reuses the same confirmation/audit/executor pipeline.
+- CLI `model <start|stop|restart|health|benchmark>` posts typed daemon model
+  actions.
+- WSL root helper package now includes vLLM start/stop/health/logs/benchmark
+  scripts and appends `VLLM_*` defaults into existing runtime env files.
+
 ## Current Runtime Observation
 
 The last real Phase 4 E2E smoke observed on May 2, 2026:
@@ -102,25 +118,24 @@ runtime claims.
 
 Latest pushed commits:
 
+- `869971c feat: close out Phase 4 daemon CLI actions`
 - `90a5a99 feat: add WSL root helper integration`
 - `c95855c feat: add Hermes fixed-script execution boundary`
 - `44a6eaa feat: expose execution status on confirm`
 - `660a210 feat: wire allowlisted Windows executor`
-- `87ac3dc feat: add injectable operation executor`
 
 ## Current Phase
 
-Phase 4 is functionally closed after the CLI closeout changes are committed.
-Current local unpushed closeout work:
+Phase 5 is in progress. Current local unpushed work:
 
-- CLI mutating commands call daemon APIs for Hermes, WSL, confirm, and cancel.
-- Confirmed Hermes restart was smoke-tested through CLI -> daemon ->
-  `/opt/hermes-control/bin` WSL root helpers and returned `Execution:
-  completed`.
-- Final observed Hermes health was `http://127.0.0.1:8642/health` ready with a
-  fresh PID after restart.
-- Keep Phase 5 vLLM runtime work out of Phase 4; the next phase should focus on
-  first-class vLLM runtime management.
+- Initial vLLM runtime action planner, daemon route, CLI model action client, and
+  WSL root vLLM helpers.
+- The helpers have been installed into `/opt/hermes-control/bin`.
+- `hermes-control-vllm-health.sh qwen36-mtp 1 ready` correctly returns
+  `unhealthy` because the vLLM endpoint is not currently ready; no model start
+  smoke was run to avoid occupying GPU unintentionally.
+- Next Phase 5 increment should decide whether to actually start qwen36-mtp or
+  AWQ in a controlled smoke, then add readiness polling/state persistence.
 
 ## Useful Commands
 
@@ -158,10 +173,19 @@ cargo run -p hermes-control-cli -- --api-token phase4-token hermes wake --reason
 cargo run -p hermes-control-cli -- --api-token phase4-token confirm HERMES-1234
 ```
 
+Phase 5 model dry-run smoke:
+
+```powershell
+$env:HERMES_CONTROL_API_TOKEN = "phase5-token"
+cargo run -p hermes-control-daemon
+cargo run -p hermes-control-cli -- --api-token phase5-token model start qwen36-mtp --dry-run --reason "smoke"
+wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-vllm-health.sh qwen36-mtp 1 ready
+```
+
 ## Handoff Notes
 
 - Keep `docs/RECENT_CHANGES.md` updated after each landed conversation-level
   change.
-- Keep Phase 4 narrow: typed WSL/Hermes ops first, no vLLM Phase 5 work yet.
+- Phase 5 should stay focused on vLLM runtime control before route switching.
 - Tauri belongs in Phase 8 as a GUI shell and typed daemon client only.
 - Ask for explicit approval before commit and push.
