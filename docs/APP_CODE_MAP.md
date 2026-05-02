@@ -17,6 +17,11 @@ This map explains where to work in the Hermes Control Rust workspace.
   `Ubuntu-Hermes-Codex` and expose `/v1/models` on
   `http://127.0.0.1:18080`.
 - `docs/`: handoff notes, boundary docs, and change log.
+- `vLLM/`: Hermes Control-owned vLLM runtime scaffold. Scripts are tracked;
+  `.venv`, cache, logs, downloads, and accidental local models are ignored.
+  Default model weights live outside this directory at `E:\WSL\vLLM\models`.
+  vLLM socket/temp files default to WSL `/tmp` for DrvFS compatibility; pip
+  cache may also fall back there when DrvFS ownership is incompatible with pip.
 
 ## Crates
 
@@ -75,6 +80,19 @@ This map explains where to work in the Hermes Control Rust workspace.
   - vLLM helpers start/stop/health/log/benchmark fixed model runtime operations
     through the same root-side package. Benchmark is a reserved helper in this
     first Phase 5 increment.
+  - `hermes-control-vllm-bootstrap.sh` runs the project-owned vLLM bootstrap
+    script for daemon-triggered install/repair.
+  - `install.sh` refreshes `VLLM_*` defaults in `/etc/hermes-control/runtime.env`
+    so stale old workspace paths migrate to the project-owned `vLLM/` runtime.
+
+- `vLLM/scripts`
+  - `env.sh`: project runtime environment, cache/log/temp defaults, external
+    model store, and direct-first/fallback-proxy network policy.
+  - `bootstrap.sh`: creates or repairs the project-owned Python venv and installs
+    vLLM.
+  - `serve-openai.sh`: shared OpenAI-compatible vLLM launcher.
+  - `start-qwen36-mtp.sh` and `start-qwen36-int4-eager.sh`: fixed variant entry
+    scripts consumed by WSL root helpers.
 
 - `crates/hermes-control-cli`
   - Clap command definitions and CLI rendering.
@@ -82,13 +100,14 @@ This map explains where to work in the Hermes Control Rust workspace.
   - Phase 4 mutating commands call daemon APIs with bearer auth:
     `hermes <wake|stop|restart|kill>`,
     `wsl <wake|stop|restart|shutdown-all>`, `confirm <code>`, and `cancel`.
-  - Phase 5 `model <start|stop|restart|health|benchmark>` commands call daemon
-    model action APIs.
+  - Phase 5 `model <install|start|stop|restart|health|benchmark>` commands call
+    daemon model action APIs.
 
 - `crates/hermes-control-bot`
   - Windows-hosted Teloxide subprocess.
   - Environment-based config, allowlist checks, Telegram command parsing, daemon
     request planning, and daemon response formatting.
+  - `/model install <model-id>` maps to typed `ModelAction::Install`.
   - Must remain a thin daemon client.
 
 - `crates/hermes-control-gui`
@@ -109,6 +128,10 @@ This map explains where to work in the Hermes Control Rust workspace.
   helper install asset contract.
 - `crates/hermes-control-core/tests/phase5_model_runtime_plans.rs`: vLLM model
   runtime operation-plan contract.
+- `crates/hermes-control-core/tests/phase5_vllm_project_runtime_assets.rs`:
+  project-owned vLLM runtime path, script assets, and external model-store
+  contract, plus WSL-primary-IP endpoint resolution and vLLM health response
+  parsing.
 - `crates/hermes-control-core/tests/read_only_core.rs`: WSL parser, vLLM model
   parsing, log tailing, and status behavior.
 - `crates/hermes-control-cli/tests/help_contract.rs`: CLI help contract.

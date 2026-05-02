@@ -660,6 +660,18 @@ fn windows_executor_allows_fixed_vllm_wsl_scripts() {
                     "ready",
                 ],
             ),
+            command(
+                "wsl.exe",
+                [
+                    "--distribution",
+                    "Ubuntu-Hermes-Codex",
+                    "--user",
+                    "root",
+                    "--exec",
+                    "/opt/hermes-control/bin/hermes-control-vllm-bootstrap.sh",
+                    "qwen36-mtp",
+                ],
+            ),
         ],
     };
 
@@ -668,8 +680,8 @@ fn windows_executor_allows_fixed_vllm_wsl_scripts() {
     assert_eq!(outcome.status, "completed", "{}", outcome.summary);
     assert_eq!(
         runner.commands.lock().expect("runner lock").len(),
-        2,
-        "both vLLM commands should run"
+        3,
+        "all fixed vLLM commands should run"
     );
 }
 
@@ -860,11 +872,11 @@ models = ["test-model"]
 [[runtimes]]
 id = "vllm-local"
 kind = "Vllm"
-workspace = "E:\\WSL\\vLLM"
+workspace = "E:\\WSL\\Hermres\\hermes-control\\vLLM"
 wsl_distro = "Ubuntu-Hermes-Codex"
 endpoint = "http://127.0.0.1:9/v1"
 models_endpoint = "http://127.0.0.1:9/v1/models"
-log_dir = "E:\\WSL\\vLLM\\logs"
+log_dir = "E:\\WSL\\Hermres\\hermes-control\\vLLM\\logs"
 
 [[runtimes.variants]]
 id = "qwen36-mtp"
@@ -873,7 +885,7 @@ mode = "latency"
 max_model_len = 90000
 speculative_method = "mtp"
 num_speculative_tokens = 2
-start = { kind = "wsl_script", script = "/mnt/e/WSL/vLLM/scripts/start-qwen36-mtp.sh" }
+start = { kind = "wsl_script", script = "/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/start-qwen36-mtp.sh" }
 stop = { kind = "process_match", served_model_name = "qwen36-mtp" }
 profiles = ["vllm.qwen36-mtp"]
 "#,

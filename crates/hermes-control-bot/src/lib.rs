@@ -263,6 +263,7 @@ fn plan_model(
     match lower.as_str() {
         "status" => Ok(get(format!("/v1/models/{model_id}"))),
         "logs" => Ok(get(format!("/v1/models/{model_id}/logs?tail=200"))),
+        "install" => model_action(model_id, requester, ModelAction::Install, "install"),
         "start" => model_action(model_id, requester, ModelAction::Start, "start"),
         "stop" => model_action(model_id, requester, ModelAction::Stop, "stop"),
         "restart" => model_action(model_id, requester, ModelAction::Restart, "restart"),
@@ -407,13 +408,13 @@ fn parse_command(text: &str) -> Result<AdminCommand, BotError> {
             action: required_arg(
                 &parts,
                 1,
-                "/model <status|start|stop|restart|logs|benchmark> <model-id>",
+                "/model <status|install|start|stop|restart|logs|benchmark> <model-id>",
             )?
             .to_owned(),
             model_id: required_arg(
                 &parts,
                 2,
-                "/model <status|start|stop|restart|logs|benchmark> <model-id>",
+                "/model <status|install|start|stop|restart|logs|benchmark> <model-id>",
             )?
             .to_owned(),
         }),
@@ -469,7 +470,7 @@ fn help_text() -> String {
         "/route",
         "/switch <profile-id>",
         "/models",
-        "/model <status|start|stop|restart|logs|benchmark> <model-id>",
+        "/model <status|install|start|stop|restart|logs|benchmark> <model-id>",
         "/hermes <wake|stop|restart|kill|status>",
         "/wsl <status|wake|stop|restart>",
         "/logs <hermes|daemon|bot|model> [id]",

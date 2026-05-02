@@ -29,6 +29,7 @@ pub enum WslAction {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModelAction {
+    Install,
     Start,
     Stop,
     Restart,

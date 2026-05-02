@@ -235,3 +235,71 @@ unimplemented ideas here.
   installed them into the current WSL distro.
 - Corrected static vLLM start script facts to current existing scripts:
   `start-qwen36-mtp.sh` and `start-qwen36-int4-eager.sh`.
+
+## 2026-05-03: Phase 5 vLLM self-deployment requirement added
+
+- Updated the plan to require future Hermes Control support for vLLM
+  self-deployment/provisioning, not only adoption of an existing runtime.
+- Defined adopt-existing, fresh-install, and repair-install modes.
+- Documented install-test safety: runtime files may be recreated, but
+  `E:\WSL\vLLM\models` must be preserved by default.
+- Added network policy: prefer direct connectivity and use configured fallback
+  proxy only after direct install/download attempts fail.
+
+## 2026-05-03: Phase 5 project-owned vLLM runtime scaffold
+
+- Clarified that `E:\WSL\vLLM\models` is only the model-weight store.
+- Moved the software-owned vLLM runtime boundary to
+  `E:\WSL\Hermres\hermes-control\vLLM`.
+- Added project runtime scripts for env setup, bootstrap/repair install,
+  OpenAI-compatible serve, qwen36 MTP start, and qwen36 AWQ INT4 eager start.
+- Kept vLLM socket/temp defaults on WSL `/tmp` for DrvFS compatibility while
+  keeping venv/cache/logs/scripts under the project-owned runtime.
+- Made pip cache fall back to WSL `/tmp` when DrvFS ownership makes pip refuse
+  the project cache directory.
+- Updated `config/model-runtimes.toml` and WSL helper defaults so vLLM start
+  scripts and logs point at the project-owned runtime.
+- Made `scripts/wsl-root/install.sh` migrate old `VLLM_*` values in
+  `/etc/hermes-control/runtime.env` instead of leaving stale old workspace
+  paths behind.
+- Added typed `ModelAction::Install`, CLI/Bot `model install <model-id>`, and a
+  WSL root bootstrap helper so the daemon can trigger project-owned vLLM repair
+  through the same allowlisted execution path.
+- Added tests that protect the project-owned runtime path while preserving the
+  external model store.
+- Verified the bootstrap helper on this WSL distro. It created
+  `E:\WSL\Hermres\hermes-control\vLLM\.venv` and installed vLLM 0.20.0 with
+  Torch 2.11.0. The model endpoint remains not ready until a model is started.
+
+## 2026-05-03: Phase 5 qwen36 MTP live validation
+
+- Started `qwen36-mtp` from the project-owned vLLM runtime and verified
+  `/v1/models` plus `/v1/chat/completions` with an `OK` response.
+- Confirmed vLLM 0.20.0 loaded `Qwen3_5ForConditionalGeneration` with
+  `Qwen3_5MTP`, `SpeculativeConfig(method='mtp', num_spec_tokens=2)`, tensor
+  parallel size 2, and model weights from `E:\WSL\vLLM\models`.
+- Found this WSL/vLLM server is callable on the WSL primary IP, not reliably on
+  `127.0.0.1`; updated fixed start scripts and WSL helpers to resolve the WSL
+  primary IP at runtime while preserving explicit overrides.
+- Fixed `hermes-control-vllm-health.sh`: the previous heredoc-based parser
+  discarded the `/v1/models` response body, so health stayed false even while
+  vLLM returned HTTP 200.
+- Updated this machine's Hermes `custom:vllm` provider to
+  `http://10.2.176.55:18080/v1`, extended Hermes `NO_PROXY`, restarted Hermes,
+  and verified Hermes gateway returned `OK` through the local model.
+- Verified Open WebUI can call the local model through its Hermes gateway
+  backend: `/openai/models` exposed `hermes-agent` and
+  `/openai/chat/completions` returned `OK`.
+
+## 2026-05-03: WSL2/Hermes provisioning plan and Chinese README
+
+- Added root-level `plan_wsl2_hermes_provisioning.md` to separate WSL2,
+  Hermes, Open WebUI, and vLLM provisioning from the main Rust rewrite plan.
+- Defined Adopt Existing, Repair Install, and Fresh Install provisioning modes.
+- Documented root helper, filesystem, vLLM, Hermes, Open WebUI, backup,
+  validation, and completion contracts for future installer/assistant work.
+- Added a Chinese root `README.md` covering project purpose, current status,
+  directory map, WSL helper commands, vLLM commands, safety principles, and git
+  workflow.
+- Added a cross-reference from the main Rust rewrite plan to the new
+  provisioning plan.

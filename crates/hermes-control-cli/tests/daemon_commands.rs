@@ -131,6 +131,37 @@ async fn model_start_posts_typed_action_to_daemon() {
     assert!(rendered.contains("Start vLLM model qwen36-mtp"));
 }
 
+#[tokio::test]
+async fn model_install_posts_typed_action_to_daemon() {
+    let server = OneShotHttpServer::new(
+        r#"{"status":"dry_run","risk":"NormalMutating","summary":"Install or repair vLLM runtime","dry_run":true,"commands":[]}"#,
+    );
+    let url = server.url();
+    let cli = Cli::try_parse_from([
+        "hermes-control",
+        "--daemon-url",
+        &url,
+        "--api-token",
+        "phase5-cli-token",
+        "model",
+        "install",
+        "qwen36-mtp",
+        "--dry-run",
+        "--reason",
+        "phase5 install smoke",
+    ])
+    .expect("CLI args should parse");
+
+    let rendered = run_cli(cli).await.expect("CLI command should run");
+    let request = server.join();
+
+    assert!(request.starts_with("POST /v1/models/qwen36-mtp/action HTTP/1.1"));
+    assert!(request.contains(r#""action":"Install""#));
+    assert!(request.contains(r#""reason":"phase5 install smoke""#));
+    assert!(request.contains(r#""dry_run":true"#));
+    assert!(rendered.contains("Install or repair vLLM runtime"));
+}
+
 struct OneShotHttpServer {
     address: String,
     handle: thread::JoinHandle<String>,

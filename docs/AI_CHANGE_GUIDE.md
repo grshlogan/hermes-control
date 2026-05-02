@@ -26,6 +26,8 @@ rules below are specific to the Hermes Rust control rewrite.
 - Secrets stay behind `*_ref`, environment variables, or local secret stores.
   Do not commit raw provider keys, daemon bearer tokens, or Telegram tokens.
 - Daemon bind defaults to `127.0.0.1`; LAN bind remains policy-controlled.
+- The Hermes Control-owned vLLM runtime is `E:\WSL\Hermres\hermes-control\vLLM`.
+  Treat `E:\WSL\vLLM\models` only as the external model-weight store.
 - Tauri is planned for Phase 8 only. Before that, `hermes-control-gui` may hold
   boundary types or daemon-client helpers, not a real GUI authority surface.
 

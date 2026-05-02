@@ -61,6 +61,10 @@ The intended final workspace will grow toward the layout described in
   `/opt/hermes-control/bin`.
 - Legacy `/root/Hermres/*.sh` files are historical artifacts. Do not make them
   daemon targets or allowlist entries.
+- The project-owned vLLM runtime lives under
+  `E:\WSL\Hermres\hermes-control\vLLM`. Treat `E:\WSL\vLLM\models` only as the
+  external model-weight store; do not recreate the software runtime under the
+  old `E:\WSL\vLLM` workspace.
 
 ## Rust Development Rules
 

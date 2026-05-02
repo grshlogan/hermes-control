@@ -5,11 +5,11 @@ const MODEL_RUNTIMES: &str = r#"
 [[runtimes]]
 id = "vllm-local"
 kind = "Vllm"
-workspace = "E:\\WSL\\vLLM"
+workspace = "E:\\WSL\\Hermres\\hermes-control\\vLLM"
 wsl_distro = "Ubuntu-Hermes-Codex"
 endpoint = "http://127.0.0.1:18080/v1"
 models_endpoint = "http://127.0.0.1:18080/v1/models"
-log_dir = "E:\\WSL\\vLLM\\logs"
+log_dir = "E:\\WSL\\Hermres\\hermes-control\\vLLM\\logs"
 
 [[runtimes.variants]]
 id = "qwen36-mtp"
@@ -18,7 +18,7 @@ mode = "latency"
 max_model_len = 90000
 speculative_method = "mtp"
 num_speculative_tokens = 2
-start = { kind = "wsl_script", script = "/mnt/e/WSL/vLLM/scripts/start-qwen36-mtp.sh" }
+start = { kind = "wsl_script", script = "/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/start-qwen36-mtp.sh" }
 stop = { kind = "process_match", served_model_name = "qwen36-mtp" }
 profiles = ["vllm.qwen36-mtp"]
 "#;
@@ -84,6 +84,32 @@ fn model_stop_plan_requires_confirmation_and_targets_served_model() {
             "root",
             "--exec",
             "/opt/hermes-control/bin/hermes-control-vllm-stop.sh",
+            "qwen36-mtp",
+        ]
+    );
+}
+
+#[test]
+fn model_install_plan_bootstraps_project_vllm_runtime() {
+    let config = parse_model_runtimes_config(MODEL_RUNTIMES).expect("config should parse");
+    let controller = ModelRuntimeController::new(&config, "root");
+
+    let plan = controller
+        .plan("qwen36-mtp", ModelAction::Install)
+        .expect("qwen36-mtp should be known");
+
+    assert_eq!(plan.risk, RiskLevel::NormalMutating);
+    assert!(!plan.requires_confirmation);
+    assert!(plan.summary.contains("Install or repair vLLM runtime"));
+    assert_eq!(
+        plan.commands[0].args,
+        [
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "root",
+            "--exec",
+            "/opt/hermes-control/bin/hermes-control-vllm-bootstrap.sh",
             "qwen36-mtp",
         ]
     );

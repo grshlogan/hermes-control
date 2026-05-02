@@ -86,12 +86,20 @@ Phase 5 has started:
   `hermes-control-vllm-health.sh <served-model> 180 ready`.
 - Model `Stop` and `Restart` require confirmation; `Benchmark` is marked
   experimental and reserved for a later Phase 5 increment.
+- Model `Install` runs the project-owned vLLM bootstrap helper through the same
+  daemon/WSL root execution boundary.
 - Daemon route `/v1/models/{model_id}/action` accepts typed `ModelAction`
   requests and reuses the same confirmation/audit/executor pipeline.
 - CLI `model <start|stop|restart|health|benchmark>` posts typed daemon model
   actions.
 - WSL root helper package now includes vLLM start/stop/health/logs/benchmark
   scripts and appends `VLLM_*` defaults into existing runtime env files.
+- The software-owned vLLM runtime boundary is now
+  `E:\WSL\Hermres\hermes-control\vLLM`; `E:\WSL\vLLM\models` is only the
+  external model-weight store.
+- Project runtime scripts now exist under `vLLM/scripts/` for environment setup,
+  bootstrap/repair install, OpenAI-compatible serving, qwen36 MTP, and qwen36
+  AWQ INT4 eager startup.
 
 ## Current Runtime Observation
 
@@ -118,24 +126,43 @@ runtime claims.
 
 Latest pushed commits:
 
+- `99dac2a feat: start Phase 5 vLLM runtime actions`
 - `869971c feat: close out Phase 4 daemon CLI actions`
 - `90a5a99 feat: add WSL root helper integration`
 - `c95855c feat: add Hermes fixed-script execution boundary`
 - `44a6eaa feat: expose execution status on confirm`
-- `660a210 feat: wire allowlisted Windows executor`
 
 ## Current Phase
 
 Phase 5 is in progress. Current local unpushed work:
 
-- Initial vLLM runtime action planner, daemon route, CLI model action client, and
-  WSL root vLLM helpers.
-- The helpers have been installed into `/opt/hermes-control/bin`.
-- `hermes-control-vllm-health.sh qwen36-mtp 1 ready` correctly returns
-  `unhealthy` because the vLLM endpoint is not currently ready; no model start
-  smoke was run to avoid occupying GPU unintentionally.
-- Next Phase 5 increment should decide whether to actually start qwen36-mtp or
-  AWQ in a controlled smoke, then add readiness polling/state persistence.
+- Project-owned vLLM runtime scaffold under
+  `E:\WSL\Hermres\hermes-control\vLLM`.
+- `config/model-runtimes.toml` points qwen36 AWQ and MTP start scripts and logs
+  at that project runtime.
+- WSL root installer/common defaults migrate `VLLM_*` runtime paths away from
+  the old shared `E:\WSL\vLLM` workspace while preserving
+  `E:\WSL\vLLM\models` as the model-weight store.
+- `vLLM/scripts/bootstrap.sh` can create or repair the project venv with
+  direct-first/fallback-proxy dependency installation. vLLM socket/temp files
+  default to WSL `/tmp` for DrvFS compatibility; pip cache falls back there when
+  DrvFS ownership makes pip disable the project cache.
+- CLI `model install <model-id>` posts `ModelAction::Install`; dry-run previews
+  are available before running the bootstrap.
+- Telegram `/model install <model-id>` maps to the same daemon action.
+- The bootstrap helper was run successfully on this machine and installed vLLM
+  0.20.0 plus Torch 2.11.0 into
+  `E:\WSL\Hermres\hermes-control\vLLM\.venv`.
+- `qwen36-mtp` has been started from the project-owned vLLM runtime and verified
+  live. The working endpoint on this WSL distro is the WSL primary IP
+  (`http://10.2.176.55:18080/v1` during the 2026-05-03 smoke), not loopback.
+- `hermes-control-vllm-health.sh qwen36-mtp 5 ready` now returns ready after
+  fixing the `/v1/models` body parser and runtime endpoint resolution.
+- Hermes `custom:vllm` and Open WebUI were both verified against the local MTP
+  model through real chat completion calls that returned `OK`.
+- Next Phase 5 increment should persist runtime readiness/state, reduce noisy
+  vLLM environment warnings, and make the local route switch reproducible
+  without hand-editing Hermes/Open WebUI config.
 
 ## Useful Commands
 
@@ -152,6 +179,7 @@ Install or refresh WSL root helpers:
 ```powershell
 wsl.exe -d Ubuntu-Hermes-Codex -u root --exec bash -lc "cd /mnt/e/WSL/Hermres/hermes-control && bash scripts/wsl-root/install.sh"
 wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-status.sh
+wsl.exe -d Ubuntu-Hermes-Codex -u root --exec bash -lc "cd /mnt/e/WSL/Hermres/hermes-control && bash vLLM/scripts/bootstrap.sh"
 ```
 
 Read-only CLI smoke:

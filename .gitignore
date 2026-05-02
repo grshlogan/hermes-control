@@ -3,6 +3,12 @@
 /logs/
 /tmp/
 /temp/
+/vLLM/.venv/
+/vLLM/cache/
+/vLLM/logs/
+/vLLM/tmp/
+/vLLM/downloads/
+/vLLM/models/
 
 .env
 .env.*

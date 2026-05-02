@@ -10,13 +10,21 @@ This document is a clean-slate reconstruction route for Codex. It treats the old
 
 ## 0. Ground Truth From Current Files
 
-Current vLLM workspace state:
+Current vLLM runtime posture:
 
-- vLLM venv: `/opt/vllm-qwen36`
-- vLLM workspace: `E:\WSL\vLLM`
-- model directory: `E:\WSL\vLLM\models`
-- log directory: `E:\WSL\vLLM\logs`
-- cache directory: `E:\WSL\vLLM\cache`
+- Hermes Control-owned vLLM runtime directory:
+  `E:\WSL\Hermres\hermes-control\vLLM`
+- WSL path for the software-owned runtime:
+  `/mnt/e/WSL/Hermres/hermes-control/vLLM`
+- Project-owned vLLM venv:
+  `E:\WSL\Hermres\hermes-control\vLLM\.venv`
+- Model-weight directory: `E:\WSL\vLLM\models`
+- Important boundary: `E:\WSL\vLLM\models` is only the reusable model store.
+  The old `E:\WSL\vLLM` workspace must not be treated as the software-owned
+  vLLM runtime environment.
+- log/cache directories belong under
+  `E:\WSL\Hermres\hermes-control\vLLM`; vLLM socket/temp files may stay under
+  WSL `/tmp` to avoid DrvFS Unix socket issues.
 - Windows-side OpenAI-compatible endpoint: `http://127.0.0.1:18080/v1`
 - local served model names:
   - `qwen36-awq-int4`
@@ -29,10 +37,14 @@ Current v1 plan direction:
 - `hermes-agent` remains the conversation runtime.
 - Telegram bot, Windows GUI, and CLI call the same Rust control daemon.
 - Bot/GUI must not directly execute arbitrary shell.
-- vLLM workspace should become a managed local model runtime.
+- vLLM should become a managed local model runtime under the project-owned
+  `hermes-control\vLLM` boundary, while model weights remain in the external
+  `E:\WSL\vLLM\models` store.
 - Hermes process control is a WSL root boundary. New code must call
   product-owned helpers installed under `/opt/hermes-control/bin`, not inherited
   `.sh` files under `/root/Hermres`.
+- WSL2, Hermes, Open WebUI, and local-stack provisioning are tracked in the
+  separate root plan `plan_wsl2_hermes_provisioning.md`.
 
 V2 keeps these principles but changes the migration posture from “compatibility-first” to **clean rebuild with legacy as read-only behavior reference**.
 
@@ -273,6 +285,7 @@ hermes-control route active
 hermes-control route switch <profile-id>
 hermes-control models
 hermes-control model status <model-id>
+hermes-control model install <model-id>
 hermes-control model start <model-id>
 hermes-control wsl status
 hermes-control wsl restart --confirm
@@ -373,18 +386,18 @@ served_model_name = "qwen36-mtp"
 [[runtimes]]
 id = "vllm-local"
 kind = "Vllm"
-workspace = "E:\\WSL\\vLLM"
+workspace = "E:\\WSL\\Hermres\\hermes-control\\vLLM"
 wsl_distro = "Ubuntu-Hermes-Codex"
 endpoint = "http://127.0.0.1:18080/v1"
 models_endpoint = "http://127.0.0.1:18080/v1/models"
-log_dir = "E:\\WSL\\vLLM\\logs"
+log_dir = "E:\\WSL\\Hermres\\hermes-control\\vLLM\\logs"
 
 [[runtimes.variants]]
 id = "qwen36-awq-int4"
 served_model_name = "qwen36-awq-int4"
 mode = "stable"
 max_model_len = 90000
-start = { kind = "wsl_script", script = "/mnt/e/WSL/vLLM/scripts/start-qwen36-int4-eager.sh" }
+start = { kind = "wsl_script", script = "/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/start-qwen36-int4-eager.sh" }
 stop = { kind = "process_match", served_model_name = "qwen36-awq-int4" }
 profiles = ["vllm.qwen36-awq-int4"]
 
@@ -395,7 +408,7 @@ mode = "latency"
 max_model_len = 90000
 speculative_method = "mtp"
 num_speculative_tokens = 2
-start = { kind = "wsl_script", script = "/mnt/e/WSL/vLLM/scripts/start-qwen36-mtp.sh" }
+start = { kind = "wsl_script", script = "/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/start-qwen36-mtp.sh" }
 stop = { kind = "process_match", served_model_name = "qwen36-mtp" }
 profiles = ["vllm.qwen36-mtp"]
 
@@ -616,7 +629,80 @@ Readiness is not “process exists”. Readiness is:
 4. Optional smoke chat/completion under small max tokens succeeds.
 5. Last N log lines contain no fatal CUDA/vLLM error patterns.
 
-### 11.3 Start Flow
+### 11.3 Provisioning and Self-Deployment
+
+Hermes Control must be able to bootstrap its own vLLM environment, not only
+adopt an existing one.
+
+Provisioning modes:
+
+```text
+AdoptExisting
+  Purpose: use existing model weights under `E:\WSL\vLLM\models` and, if
+  present, an already prepared project-owned runtime under
+  `E:\WSL\Hermres\hermes-control\vLLM`.
+  Current status: the first Phase 5 mode is migrating lifecycle control to this
+  project-owned runtime boundary.
+
+FreshInstall
+  Purpose: prepare vLLM on a new machine or after deleting the old runtime
+  environment.
+  Must preserve: model files under `E:\WSL\vLLM\models`.
+  May recreate: vLLM virtual environment, cache directories, helper scripts,
+  logs, generated config under `E:\WSL\Hermres\hermes-control\vLLM`, and
+  ephemeral WSL temp/socket files under `/tmp/hermes-control-vllm`.
+
+RepairInstall
+  Purpose: rerun dependency installation and helper deployment when a partial
+  project-owned runtime install is detected.
+```
+
+Fresh install flow:
+
+1. Verify WSL2 distro, root helper install, NVIDIA/CUDA visibility, Python, and
+   disk space.
+2. Preserve model directory and never delete model weights without an explicit
+   separate confirmation.
+3. Create or recreate
+   `E:\WSL\Hermres\hermes-control\vLLM\.venv`
+   (`/mnt/e/WSL/Hermres/hermes-control/vLLM/.venv` inside WSL).
+4. Install Python/vLLM/PyTorch dependencies.
+5. Prepare cache/log directories under
+   `E:\WSL\Hermres\hermes-control\vLLM` and keep socket/temp defaults on WSL
+   `/tmp` unless a machine-specific override is known safe.
+6. Prefer direct network access for dependency and model metadata downloads.
+7. If direct network fails, fall back to configured proxy values.
+8. Register or refresh `config/model-runtimes.toml`.
+9. Run a lightweight health/metadata verification before any large model start.
+10. Optionally start `qwen36-awq-int4` first as the stable smoke, then `qwen36-mtp`.
+
+Safety rule for install testing:
+
+- Existing project-owned vLLM runtime files under
+  `E:\WSL\Hermres\hermes-control\vLLM` and ephemeral WSL `/tmp`
+  `hermes-control-vllm` files may be removed for installer validation, but
+  model files under `E:\WSL\vLLM\models` must be preserved by default.
+- Deleting model weights requires a distinct destructive action and explicit
+  confirmation text that names the model path.
+- Installer logs must be written under
+  `E:\WSL\Hermres\hermes-control\vLLM\logs` and mirrored into daemon audit
+  summaries.
+
+Network policy:
+
+- Default to direct connectivity.
+- On failure, retry through a configured fallback proxy.
+- Store proxy configuration as runtime config, not hardcoded script text.
+- Redact proxy credentials from logs and audit events.
+
+Implementation timing:
+
+- First provisioning increment is CLI/Bot/daemon driven through
+  `ModelAction::Install` and the fixed WSL root bootstrap helper.
+- GUI setup flows come later, after start/stop/health/log flows are stable
+  enough to validate the installed environment.
+
+### 11.4 Start Flow
 
 ```text
 ModelAction::Start(qwen36-mtp)
@@ -630,7 +716,7 @@ ModelAction::Start(qwen36-mtp)
   -> persist model_state
 ```
 
-### 11.4 Stop Flow
+### 11.5 Stop Flow
 
 Stop should be graceful first, hard second:
 
@@ -639,7 +725,7 @@ Stop should be graceful first, hard second:
 3. Kill only process IDs matching daemon-owned process metadata or safe vLLM command signature.
 4. Never kill arbitrary Python processes by default.
 
-### 11.5 Benchmarking
+### 11.6 Benchmarking
 
 Add a controlled benchmark action:
 
@@ -665,7 +751,7 @@ Commands:
 /route
 /switch <profile-id>
 /models
-/model <status|start|stop|restart|logs|benchmark> <model-id>
+/model <status|install|start|stop|restart|logs|benchmark> <model-id>
 /hermes <wake|stop|restart|kill>
 /wsl <status|wake|stop|restart>
 /logs <hermes|daemon|bot|model> [id]
@@ -972,21 +1058,45 @@ Codex tasks:
 - Implement runtime registry.
 - Implement `qwen36-awq-int4` and `qwen36-mtp` variants.
 - Implement start/stop/restart/status/logs.
+- Implement install/repair bootstrap for the project-owned vLLM runtime.
 - Implement `/v1/models` readiness polling.
 - Implement failed-start cleanup.
 - Implement benchmark action.
+- Implement vLLM self-deployment/provisioning after the first lifecycle manager
+  is stable enough to validate the installed environment.
+- Support adopt-existing, fresh-install, and repair-install provisioning modes.
+- Fresh-install testing may delete/recreate project-owned vLLM runtime files
+  under `E:\WSL\Hermres\hermes-control\vLLM`, but must preserve
+  `E:\WSL\vLLM\models` by default.
+- Prefer direct network access for install/download steps and fall back to
+  configured proxy only after direct connectivity fails.
 
-Initial status as of 2026-05-02:
+Current status as of 2026-05-03:
 
 - Typed vLLM operation planning, daemon model action route, CLI model action
   calls, and canonical WSL root vLLM helper scripts have landed as the first
   Phase 5 increment.
+- `hermes-control model install <model-id>` plans the project-owned vLLM
+  bootstrap helper through the daemon.
 - Benchmark helper is intentionally reserved until benchmark persistence lands.
+- The vLLM runtime path is now project-owned:
+  `E:\WSL\Hermres\hermes-control\vLLM`; the old `E:\WSL\vLLM` tree is treated
+  only as the default model-weight store at `E:\WSL\vLLM\models`.
+- Live MTP validation has passed on the current WSL distro: `qwen36-mtp`
+  starts from the project runtime, `/v1/models` reports the model, and
+  `/v1/chat/completions` returns `OK`.
+- The WSL root helper now resolves vLLM health against the WSL primary IP at
+  runtime because this machine's vLLM server is not reliably callable through
+  loopback despite a visible listen socket.
+- Hermes `custom:vllm` and Open WebUI's Hermes-backed OpenAI route were both
+  verified with real chat completion calls returning `OK`.
 
 Completion signal:
 
 - `hermes-control model start qwen36-mtp` reaches ready state.
 - `hermes-control model logs qwen36-mtp` works.
+- Hermes and Open WebUI can route through the local MTP model without manual
+  one-off config edits.
 - failed MTP start can fall back to AWQ profile.
 
 ### Phase 6 — Route Switcher

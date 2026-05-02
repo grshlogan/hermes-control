@@ -37,6 +37,7 @@ wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/
 wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-vllm-health.sh <served-model-name> <seconds> ready
 wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-vllm-logs.sh <variant-id> <line-count>
 wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-vllm-benchmark.sh <variant-id>
+wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-vllm-bootstrap.sh <variant-id>
 ```
 
 The first Phase 5 benchmark helper is intentionally reserved and exits with a
@@ -60,6 +61,7 @@ scripts/wsl-root/
     hermes-control-vllm-health.sh
     hermes-control-vllm-logs.sh
     hermes-control-vllm-benchmark.sh
+    hermes-control-vllm-bootstrap.sh
 ```
 
 `install.sh` copies these files into `/opt/hermes-control/bin` and creates the
@@ -96,15 +98,28 @@ HERMES_HEALTH_URL=http://127.0.0.1:8642/health
 HERMES_LOG_DIR=/root/Hermres/logs
 HERMES_PID_FILE=/run/hermes-control/hermes-gateway.pid
 HERMES_ENV_FILE=/root/.hermes/.env
-VLLM_WORKSPACE=/mnt/e/WSL/vLLM
-VLLM_MODELS_ENDPOINT=http://127.0.0.1:18080/v1/models
-VLLM_LOG_DIR=/mnt/e/WSL/vLLM/logs
-VLLM_START_QWEN36_MTP=/mnt/e/WSL/vLLM/scripts/start-qwen36-mtp.sh
-VLLM_START_QWEN36_AWQ_INT4=/mnt/e/WSL/vLLM/scripts/start-qwen36-int4-eager.sh
+VLLM_WORKSPACE=/mnt/e/WSL/Hermres/hermes-control/vLLM
+VLLM_MODEL_ROOT=/mnt/e/WSL/vLLM/models
+VLLM_PORT=18080
+VLLM_CLIENT_HOST=auto
+VLLM_MODELS_ENDPOINT=auto
+VLLM_LOG_DIR=/mnt/e/WSL/Hermres/hermes-control/vLLM/logs
+VLLM_START_QWEN36_MTP=/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/start-qwen36-mtp.sh
+VLLM_START_QWEN36_AWQ_INT4=/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/start-qwen36-int4-eager.sh
+VLLM_BOOTSTRAP_SCRIPT=/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/bootstrap.sh
 ```
 
 On a fresh machine, set these paths to the actual Hermes installation before
 starting Hermes through the daemon.
+
+For vLLM, `VLLM_WORKSPACE` is the Hermes Control-owned runtime directory for
+venv, cache, scripts, logs, and temp files. `VLLM_MODEL_ROOT` is the external
+model-weight store and should not be deleted by installer repair flows.
+`VLLM_CLIENT_HOST=auto` resolves the WSL primary IP at runtime and
+`VLLM_MODELS_ENDPOINT=auto` becomes
+`http://<wsl-primary-ip>:${VLLM_PORT}/v1/models`. This avoids relying on
+`127.0.0.1` for vLLM on WSL builds where the server socket is visible but not
+callable through loopback.
 
 ## Verification
 
@@ -129,3 +144,19 @@ Check vLLM readiness without starting a model:
 ```powershell
 wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-vllm-health.sh qwen36-mtp 1 ready
 ```
+
+Bootstrap or repair the project-owned vLLM environment:
+
+```powershell
+wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-vllm-bootstrap.sh qwen36-mtp
+```
+
+Start and verify the MTP model:
+
+```powershell
+wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-vllm-start.sh qwen36-mtp
+wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-vllm-health.sh qwen36-mtp 600 ready
+```
+
+The health JSON includes the resolved `models_endpoint`. Use that endpoint for
+Hermes local-provider configuration on the same WSL distro.

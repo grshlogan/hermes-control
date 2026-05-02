@@ -1144,6 +1144,7 @@ fn is_allowlisted_vllm_script(user: &str, script: &str, args: &[String]) -> bool
             is_safe_identifier(variant) && line_count.chars().all(|ch| ch.is_ascii_digit())
         }
         ("hermes-control-vllm-benchmark.sh", [variant]) => is_safe_identifier(variant),
+        ("hermes-control-vllm-bootstrap.sh", [variant]) => is_safe_identifier(variant),
         _ => false,
     }
 }

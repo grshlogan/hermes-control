@@ -9,6 +9,62 @@ if [[ -f "$HERMES_CONTROL_CONFIG_FILE" ]]; then
   set +a
 fi
 
+hc_wsl_primary_ip() {
+  hostname -I 2>/dev/null | awk '{print $1}' || true
+}
+
+hc_resolve_vllm_client_host() {
+  case "${VLLM_CLIENT_HOST:-auto}" in
+    "" | auto)
+      local primary_ip
+      primary_ip="$(hc_wsl_primary_ip)"
+      printf '%s\n' "${primary_ip:-127.0.0.1}"
+      ;;
+    *)
+      printf '%s\n' "$VLLM_CLIENT_HOST"
+      ;;
+  esac
+}
+
+hc_resolve_vllm_models_endpoint() {
+  case "${VLLM_MODELS_ENDPOINT:-auto}" in
+    "" | auto)
+      printf 'http://%s:%s/v1/models\n' "$(hc_resolve_vllm_client_host)" "${VLLM_PORT:-18080}"
+      ;;
+    *)
+      printf '%s\n' "$VLLM_MODELS_ENDPOINT"
+      ;;
+  esac
+}
+
+hc_append_no_proxy_entry() {
+  local entry="$1"
+  if [[ -z "$entry" ]]; then
+    return
+  fi
+
+  local current="${NO_PROXY:-${no_proxy:-}}"
+  case ",${current}," in
+    *,"${entry}",*) ;;
+    "")
+      current="$entry"
+      ;;
+    *)
+      current="${current:+${current},}${entry}"
+      ;;
+  esac
+
+  export NO_PROXY="$current"
+  export no_proxy="$current"
+}
+
+hc_extend_no_proxy_for_vllm() {
+  hc_append_no_proxy_entry "$(hc_resolve_vllm_client_host)"
+  hc_append_no_proxy_entry "127.0.0.1"
+  hc_append_no_proxy_entry "localhost"
+  hc_append_no_proxy_entry "::1"
+}
+
 : "${HERMES_CONTROL_WORK_ROOT:=/root/Hermres}"
 : "${HERMES_AGENT_ROOT:=${HERMES_CONTROL_WORK_ROOT}/hermes-agent}"
 : "${HERMES_VENV_BIN:=${HERMES_AGENT_ROOT}/.venv-hermes/bin/hermes}"
@@ -18,12 +74,19 @@ fi
 : "${HERMES_PID_DIR:=/run/hermes-control}"
 : "${HERMES_PID_FILE:=${HERMES_PID_DIR}/hermes-gateway.pid}"
 : "${HERMES_ENV_FILE:=${HOME}/.hermes/.env}"
-: "${VLLM_WORKSPACE:=/mnt/e/WSL/vLLM}"
-: "${VLLM_MODELS_ENDPOINT:=http://127.0.0.1:18080/v1/models}"
+: "${VLLM_WORKSPACE:=/mnt/e/WSL/Hermres/hermes-control/vLLM}"
+: "${VLLM_MODEL_ROOT:=/mnt/e/WSL/vLLM/models}"
+: "${VLLM_PORT:=18080}"
+: "${VLLM_CLIENT_HOST:=auto}"
+: "${VLLM_MODELS_ENDPOINT:=auto}"
 : "${VLLM_LOG_DIR:=${VLLM_WORKSPACE}/logs}"
 : "${VLLM_PID_DIR:=/run/hermes-control}"
 : "${VLLM_START_QWEN36_MTP:=${VLLM_WORKSPACE}/scripts/start-qwen36-mtp.sh}"
 : "${VLLM_START_QWEN36_AWQ_INT4:=${VLLM_WORKSPACE}/scripts/start-qwen36-int4-eager.sh}"
+: "${VLLM_BOOTSTRAP_SCRIPT:=${VLLM_WORKSPACE}/scripts/bootstrap.sh}"
+
+VLLM_MODELS_ENDPOINT="$(hc_resolve_vllm_models_endpoint)"
+hc_extend_no_proxy_for_vllm
 
 hc_require_root() {
   if [[ "$(id -u)" != "0" ]]; then
@@ -33,7 +96,7 @@ hc_require_root() {
 }
 
 hc_prepare_dirs() {
-  mkdir -p "$HERMES_LOG_DIR" "$HERMES_PID_DIR" "$VLLM_LOG_DIR" "$VLLM_PID_DIR"
+  mkdir -p "$HERMES_LOG_DIR" "$HERMES_PID_DIR" "$VLLM_LOG_DIR" "$VLLM_PID_DIR" "$VLLM_MODEL_ROOT"
 }
 
 hc_load_hermes_env() {
@@ -46,7 +109,7 @@ hc_load_hermes_env() {
 }
 
 hc_health_ok() {
-  curl -fsS --max-time 2 "$HERMES_HEALTH_URL" >/dev/null 2>&1
+  curl --noproxy '*' -fsS --max-time 2 "$HERMES_HEALTH_URL" >/dev/null 2>&1
 }
 
 hc_find_pids() {
@@ -155,14 +218,15 @@ hc_vllm_start_script_for_variant() {
 hc_vllm_health_ok() {
   local served_model_name="$1"
   local body
-  body="$(curl -fsS --max-time "${VLLM_HEALTH_CURL_TIMEOUT_SECONDS:-1}" "$VLLM_MODELS_ENDPOINT" 2>/dev/null)" || return 1
-  printf '%s' "$body" | python3 - "$served_model_name" <<'PY'
+  body="$(curl --noproxy '*' -fsS --max-time "${VLLM_HEALTH_CURL_TIMEOUT_SECONDS:-1}" "$VLLM_MODELS_ENDPOINT" 2>/dev/null)" || return 1
+  VLLM_MODELS_BODY="$body" python3 - "$served_model_name" <<'PY'
 import json
+import os
 import sys
 
 served_model_name = sys.argv[1]
 try:
-    payload = json.load(sys.stdin)
+    payload = json.loads(os.environ["VLLM_MODELS_BODY"])
 except Exception:
     sys.exit(1)
 

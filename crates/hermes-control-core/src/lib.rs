@@ -254,6 +254,7 @@ const HERMES_CONTROL_VLLM_STOP_SCRIPT: &str = "hermes-control-vllm-stop.sh";
 const HERMES_CONTROL_VLLM_HEALTH_SCRIPT: &str = "hermes-control-vllm-health.sh";
 const HERMES_CONTROL_VLLM_LOGS_SCRIPT: &str = "hermes-control-vllm-logs.sh";
 const HERMES_CONTROL_VLLM_BENCHMARK_SCRIPT: &str = "hermes-control-vllm-benchmark.sh";
+const HERMES_CONTROL_VLLM_BOOTSTRAP_SCRIPT: &str = "hermes-control-vllm-bootstrap.sh";
 
 impl HermesRuntimeController {
     pub fn new(agent_root: impl Into<String>, health_url: impl Into<String>) -> Self {
@@ -373,6 +374,19 @@ impl<'a> ModelRuntimeController<'a> {
         let served_model_name = variant.served_model_name.as_str();
 
         Some(match action {
+            ModelAction::Install => OperationPlan {
+                risk: RiskLevel::NormalMutating,
+                summary: format!(
+                    "Install or repair vLLM runtime for {variant_id} under {}.",
+                    runtime.workspace
+                ),
+                commands: vec![self.vllm_command(
+                    &runtime.wsl_distro,
+                    HERMES_CONTROL_VLLM_BOOTSTRAP_SCRIPT,
+                    &[variant_id],
+                )],
+                requires_confirmation: false,
+            },
             ModelAction::Start => OperationPlan {
                 risk: RiskLevel::NormalMutating,
                 summary: format!(

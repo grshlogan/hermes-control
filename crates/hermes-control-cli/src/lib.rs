@@ -79,6 +79,8 @@ pub enum ModelCommand {
     Status { model_id: String },
     #[command(about = "Tail model runtime logs")]
     Logs { model_id: String },
+    #[command(about = "Install or repair the project-owned vLLM runtime")]
+    Install(ModelActionArgs),
     #[command(about = "Start a local model runtime through the daemon")]
     Start(ModelActionArgs),
     #[command(about = "Stop a local model runtime through the daemon")]
@@ -498,6 +500,7 @@ fn hermes_action(command: HermesCommand) -> (HermesAction, ActionOptions) {
 
 fn model_action(command: ModelCommand) -> (String, ModelAction, ActionOptions) {
     match command {
+        ModelCommand::Install(args) => (args.model_id, ModelAction::Install, args.options),
         ModelCommand::Start(args) => (args.model_id, ModelAction::Start, args.options),
         ModelCommand::Stop(args) => (args.model_id, ModelAction::Stop, args.options),
         ModelCommand::Restart(args) => (args.model_id, ModelAction::Restart, args.options),
