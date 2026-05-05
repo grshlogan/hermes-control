@@ -171,6 +171,23 @@ The sync helper backs up `OPENWEBUI_DB_FILE`, persists Open WebUI's OpenAI
 backend to Hermes gateway, sets the default model, and prints only the env key
 name used for the Open WebUI API key. It does not print the raw `API_SERVER_KEY`.
 
+Route apply then refreshes Open WebUI if it is already running:
+
+```powershell
+wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-openwebui-refresh.sh if-running
+```
+
+The refresh helper does not start Open WebUI when it was not running. When it is
+running, the helper restarts it with `OPENAI_API_BASE_URLS` pointing at Hermes
+gateway, writes only process/status metadata to stdout, and avoids printing the
+raw API key.
+
+If refresh fails after DB sync, route apply restores the Open WebUI database
+from the sync backup, restores the previous Hermes env file, restarts Hermes,
+and attempts a `force` Open WebUI refresh using the restored route env. The
+route switch operation still fails, so daemon state is not advanced to the new
+profile.
+
 For external providers, the final helper argument is an environment variable
 name, not the secret value. The helper validates that the named variable exists
 inside `HERMES_ENV_FILE` or the WSL root environment, then copies the value

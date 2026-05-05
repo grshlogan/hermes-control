@@ -89,6 +89,13 @@ pub struct RouteSwitchRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RouteRollbackRequest {
+    pub requester: Requester,
+    pub reason: String,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfirmRequest {
     pub requester: Requester,
     pub code: String,

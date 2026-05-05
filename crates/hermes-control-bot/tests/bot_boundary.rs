@@ -108,6 +108,28 @@ fn model_install_posts_typed_model_action_to_daemon() {
 }
 
 #[test]
+fn route_rollback_posts_typed_request_to_daemon() {
+    let decision = plan_message("/rollback", "123", "chat-a", &test_config()).unwrap();
+
+    assert_eq!(
+        decision,
+        BotDecision::Daemon {
+            method: HttpMethod::Post,
+            path: "/v1/route/rollback".to_owned(),
+            body: Some(json!({
+                "requester": {
+                    "channel": "telegram",
+                    "user_id": "123",
+                    "chat_id": "chat-a"
+                },
+                "reason": "telegram /rollback",
+                "dry_run": false
+            })),
+        }
+    );
+}
+
+#[test]
 fn confirm_forwards_code_to_daemon_confirmation_endpoint() {
     let decision = plan_message("/confirm HERMES-7421", "123", "chat-a", &test_config()).unwrap();
 

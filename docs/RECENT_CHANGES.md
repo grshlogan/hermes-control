@@ -354,4 +354,34 @@ unimplemented ideas here.
   Hermes health succeeds, and rolls Hermes env back if the sync helper fails.
 - Added a WSL-side smoke test proving Open WebUI config sync does not print raw
   API keys.
-- Live Open WebUI process refresh/restart remains later Phase 6 work.
+- Live Open WebUI process refresh/restart was left for the next Phase 6
+  increment.
+
+## 2026-05-05: Phase 6 Open WebUI if-running refresh
+
+- Added `hermes-control-openwebui-status.sh` and
+  `hermes-control-openwebui-refresh.sh` for product-owned Open WebUI process
+  detection and controlled restart.
+- Route apply now runs Open WebUI refresh after DB sync. If Open WebUI is not
+  running, refresh is skipped; if it is running, it is restarted with Hermes
+  gateway env.
+- Added a WSL-side refresh smoke test proving the helper passes route env to the
+  process without printing raw API keys.
+
+## 2026-05-06: Phase 6 Open WebUI refresh-failure recovery
+
+- Route apply now restores the Open WebUI database backup when refresh fails
+  after DB sync.
+- The same failure path restores the previous Hermes env, restarts Hermes, and
+  attempts to restart Open WebUI with the restored route env.
+- Added a WSL-side route apply recovery smoke test for this post-sync failure
+  path.
+
+## 2026-05-06: Phase 6 explicit route rollback closeout
+
+- Added daemon `POST /v1/route/rollback` to replay the last-known-good provider
+  through the same fixed route apply helper.
+- Added CLI `hermes-control route rollback` and Telegram `/rollback` thin-client
+  boundaries.
+- Added daemon, CLI, and bot tests covering rollback request shape, dry-run
+  preview, state mutation, and missing last-known-good rejection.

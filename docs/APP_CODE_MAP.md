@@ -67,6 +67,8 @@ This map explains where to work in the Hermes Control Rust workspace.
   - Phase 6 route switch route: `/v1/route/switch` validates provider IDs,
     stores active/last-known-good route state, audits the switch, and gates
     local vLLM profiles on readiness.
+  - Phase 6 rollback route: `/v1/route/rollback` reads last-known-good state and
+    replays that profile through the same helper before updating active route.
   - Route switch execution now plans the fixed WSL root
     `hermes-control-route-apply.sh` helper and writes active route state only
     after the helper succeeds.
@@ -102,6 +104,11 @@ This map explains where to work in the Hermes Control Rust workspace.
   - `hermes-control-openwebui-sync.sh` backs up Open WebUI `webui.db` and points
     its OpenAI backend/default model at Hermes gateway without printing API
     keys.
+  - `hermes-control-openwebui-status.sh` and
+    `hermes-control-openwebui-refresh.sh` inspect Open WebUI process state and
+    restart it with Hermes gateway env only when it is already running.
+  - Route apply restores the Open WebUI DB backup and previous Hermes env if
+    Open WebUI refresh fails after sync.
   - vLLM helpers start/stop/health/log/benchmark fixed model runtime operations
     through the same root-side package. Benchmark is a reserved helper.
   - `hermes-control-vllm-start-with-fallback.sh` tries a primary MTP variant and
@@ -128,8 +135,9 @@ This map explains where to work in the Hermes Control Rust workspace.
     `wsl <wake|stop|restart|shutdown-all>`, `confirm <code>`, and `cancel`.
   - Phase 5 `model <install|start|stop|restart|health|logs|benchmark>` commands
     call daemon model action APIs.
-  - Phase 6 `route active` reads daemon route state and
-    `route switch <profile-id>` posts typed route switch requests.
+  - Phase 6 `route active` reads daemon route state,
+    `route switch <profile-id>` posts typed route switch requests, and
+    `route rollback` posts typed last-known-good rollback requests.
 
 - `crates/hermes-control-bot`
   - Windows-hosted Teloxide subprocess.
@@ -181,10 +189,15 @@ This map explains where to work in the Hermes Control Rust workspace.
   previews, initial vLLM action previews, immediate execution for normal
   mutating actions, Windows command allowlist enforcement, and stdout capture.
 - `crates/hermes-control-daemon/tests/phase6_route_switch.rs`: Phase 6 route
-  switch command previews, state, last-known-good tracking, audit, local vLLM
-  readiness gate, and "do not update active route after apply failure" behavior.
+  switch/rollback command previews, state, last-known-good tracking, audit,
+  local vLLM readiness gate, and "do not update active route after apply
+  failure" behavior.
 - `tests/wsl-root/openwebui_sync.sh`: WSL helper smoke test for Open WebUI
   persistent config sync and secret redaction.
+- `tests/wsl-root/openwebui_refresh.sh`: WSL helper smoke test for Open WebUI
+  if-running refresh, env handoff, and secret redaction.
+- `tests/wsl-root/route_apply_openwebui_rollback.sh`: WSL helper smoke test for
+  route apply failure recovery after Open WebUI refresh errors.
 
 ## Where To Make Changes
 

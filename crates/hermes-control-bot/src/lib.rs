@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use hermes_control_types::{
     ActionRequest, CancelRequest, ConfirmRequest, HermesAction, ModelAction, Requester,
-    RouteSwitchRequest, WslAction,
+    RouteRollbackRequest, RouteSwitchRequest, WslAction,
 };
 use serde_json::Value;
 use teloxide::prelude::*;
@@ -200,6 +200,7 @@ enum AdminCommand {
     Providers,
     Route,
     Switch { profile_id: String },
+    Rollback,
     Models,
     Model { action: String, model_id: String },
     Hermes { action: String },
@@ -238,6 +239,14 @@ fn plan_command(command: AdminCommand, requester: Requester) -> Result<BotDecisi
                 requester,
                 reason: format!("telegram /switch {profile_id}"),
                 profile_id,
+                dry_run: false,
+            },
+        ),
+        AdminCommand::Rollback => post_json(
+            "/v1/route/rollback",
+            RouteRollbackRequest {
+                requester,
+                reason: "telegram /rollback".to_owned(),
                 dry_run: false,
             },
         ),
@@ -403,6 +412,7 @@ fn parse_command(text: &str) -> Result<AdminCommand, BotError> {
         "switch" => Ok(AdminCommand::Switch {
             profile_id: required_arg(&parts, 1, "/switch <profile-id>")?.to_owned(),
         }),
+        "rollback" => Ok(AdminCommand::Rollback),
         "models" => Ok(AdminCommand::Models),
         "model" => Ok(AdminCommand::Model {
             action: required_arg(
@@ -469,6 +479,7 @@ fn help_text() -> String {
         "/providers",
         "/route",
         "/switch <profile-id>",
+        "/rollback",
         "/models",
         "/model <status|install|start|stop|restart|logs|benchmark> <model-id>",
         "/hermes <wake|stop|restart|kill|status>",

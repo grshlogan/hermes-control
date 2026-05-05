@@ -223,6 +223,36 @@ async fn route_switch_posts_typed_request_to_daemon() {
     assert!(rendered.contains("Switched active route to external.test"));
 }
 
+#[tokio::test]
+async fn route_rollback_posts_typed_request_to_daemon() {
+    let server = OneShotHttpServer::new(
+        r#"{"status":"dry_run","risk":"NormalMutating","summary":"Rollback active route to external.test and apply Hermes provider profile.","dry_run":true,"commands":[]}"#,
+    );
+    let url = server.url();
+    let cli = Cli::try_parse_from([
+        "hermes-control",
+        "--daemon-url",
+        &url,
+        "--api-token",
+        "phase6-cli-token",
+        "route",
+        "rollback",
+        "--dry-run",
+        "--reason",
+        "phase6 rollback smoke",
+    ])
+    .expect("CLI args should parse");
+
+    let rendered = run_cli(cli).await.expect("CLI command should run");
+    let request = server.join();
+
+    assert!(request.starts_with("POST /v1/route/rollback HTTP/1.1"));
+    assert!(request.contains(r#""reason":"phase6 rollback smoke""#));
+    assert!(request.contains(r#""dry_run":true"#));
+    assert!(request.contains(r#""channel":"cli""#));
+    assert!(rendered.contains("Rollback active route to external.test"));
+}
+
 struct OneShotHttpServer {
     address: String,
     handle: thread::JoinHandle<String>,

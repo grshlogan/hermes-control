@@ -2,7 +2,7 @@
 
 Hermes Control 是一个面向 Windows + WSL2 的本地 AI 控制器。它的目标不是再做一个聊天客户端，而是接管本地 Hermes 运行栈的关键控制面：WSL2 生命周期、Hermes 进程、vLLM 本地模型运行时、Open WebUI 接入、路由切换、日志、健康检查和安全确认。
 
-当前项目已完成 Phase 5 基础收尾，并进入 Phase 6：Rust 控制核心、CLI、daemon、bot 边界、WSL root helper、项目内 vLLM 运行时和 qwen36 MTP 实测链路已经建立；route switcher 已能应用 Hermes env patch，并同步 Open WebUI 持久配置到 Hermes gateway；GUI 和完整安装向导还在后续阶段。
+当前项目已完成 Phase 5 基础收尾，并完成 Phase 6 route switcher 主闭环：Rust 控制核心、CLI、daemon、bot 边界、WSL root helper、项目内 vLLM 运行时和 qwen36 MTP 实测链路已经建立；route switcher 已能应用 Hermes env patch，同步 Open WebUI 持久配置，在 Open WebUI 已运行时受控刷新进程，并支持显式回滚到 last-known-good route；GUI 和完整安装向导还在后续阶段。
 
 ## 当前能力
 
@@ -24,13 +24,13 @@ Hermes Control 是一个面向 Windows + WSL2 的本地 AI 控制器。它的目
 - Open WebUI 经 Hermes gateway 调用本地模型实测。
 - daemon/CLI 级 route active 与 route switch 状态骨架。
 - 固定 WSL root route-apply helper：切换前应用 Hermes env patch、重启并健康检查。
+- 显式 route rollback：CLI、daemon API 和 Telegram bot 边界均可触发 last-known-good 回滚。
 
 仍在规划或后续阶段：
 
 - 完整 GUI。
 - 一键 Fresh Install 向导。
 - Hermes/Open WebUI 接入自动化的完整安装向导。
-- Hermes/Open WebUI route switcher 的实时热重载和更完整回滚。
 - benchmark 持久化和 GUI 展示。
 - Windows service/installer。
 
@@ -170,9 +170,10 @@ plan_wsl2_hermes_provisioning.md
 ```powershell
 cargo run -p hermes-control-cli -- --api-token <token> route active
 cargo run -p hermes-control-cli -- --api-token <token> route switch external.openai-compatible --dry-run --reason "smoke"
+cargo run -p hermes-control-cli -- --api-token <token> route rollback --dry-run --reason "rollback smoke"
 ```
 
-这一步会验证 provider、在切到 local vLLM profile 时检查模型 ready，并先通过 WSL root helper 应用 Hermes route env patch。外部 provider 的 `api_key_ref` 只会解析成 `LM_API_KEY` 这类 env key 名称，raw key 不经过 daemon。只有 helper 重启 Hermes 并通过健康检查、同步 Open WebUI 持久配置后，daemon 才会维护 active route 和 last-known-good route。
+这一步会验证 provider、在切到 local vLLM profile 时检查模型 ready，并先通过 WSL root helper 应用 Hermes route env patch。外部 provider 的 `api_key_ref` 只会解析成 `LM_API_KEY` 这类 env key 名称，raw key 不经过 daemon。只有 helper 重启 Hermes、通过健康检查、同步 Open WebUI 持久配置，并在 Open WebUI 已运行时刷新进程后，daemon 才会维护 active route 和 last-known-good route。若 Open WebUI refresh 在 DB sync 后失败，helper 会恢复 Open WebUI DB 备份和旧 Hermes env，并尝试把 Open WebUI 拉回旧 route。`route rollback` 会重放 last-known-good profile 的同一条受控 route apply 流程。
 
 ## 文档入口
 

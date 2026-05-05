@@ -5,7 +5,8 @@ use hermes_control_core::{collect_read_only_status, load_config_dir};
 use hermes_control_types::{
     ActionRequest, ActiveRouteStatus, CancelRequest, ConfirmRequest, ConfirmationLifecycleResponse,
     EndpointStatus, HermesAction, ModelAction, ModelRuntimeSummary, OperationResponse,
-    ProviderConfig, ReadOnlyStatus, Requester, RequesterChannel, RouteSwitchRequest, WslAction,
+    ProviderConfig, ReadOnlyStatus, Requester, RequesterChannel, RouteRollbackRequest,
+    RouteSwitchRequest, WslAction,
 };
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -73,6 +74,8 @@ pub enum RouteCommand {
     Active,
     #[command(about = "Switch the active AI route through the daemon")]
     Switch(RouteSwitchArgs),
+    #[command(about = "Rollback to the daemon's last-known-good AI route")]
+    Rollback(ActionOptions),
 }
 
 #[derive(Debug, Subcommand)]
@@ -196,6 +199,19 @@ pub async fn run_cli(cli: Cli) -> anyhow::Result<String> {
                         profile_id: args.profile_id,
                         reason: args.options.reason,
                         dry_run: args.options.dry_run,
+                    },
+                )
+                .await?;
+            render_operation_response(&response, format)
+        }
+        Some(Command::Route(RouteCommand::Rollback(options))) => {
+            let response = daemon
+                .post_json::<_, OperationResponse>(
+                    "/v1/route/rollback",
+                    &RouteRollbackRequest {
+                        requester: cli_requester(),
+                        reason: options.reason,
+                        dry_run: options.dry_run,
                     },
                 )
                 .await?;

@@ -21,7 +21,7 @@ use hermes_control_types::{
     ActionRequest, ActiveRouteStatus, AiProviderKind, AuditEventSummary, CancelRequest,
     CommandPreview, ConfirmRequest, ConfirmationLifecycleResponse, HealthStatus, HermesAction,
     ModelAction, ModelRuntimeSummary, OperationResponse, ProviderConfig, ReadOnlyStatus, Requester,
-    RequesterChannel, RiskLevel, RouteSwitchRequest, WslAction,
+    RequesterChannel, RiskLevel, RouteRollbackRequest, RouteSwitchRequest, WslAction,
 };
 use rusqlite::{Connection, OptionalExtension};
 use thiserror::Error;
@@ -243,6 +243,7 @@ pub fn build_router_with_executor(
         .route("/v1/models/{model_id}/action", post(model_action))
         .route("/v1/route/active", get(active_route))
         .route("/v1/route/switch", post(route_switch))
+        .route("/v1/route/rollback", post(route_rollback))
         .route("/v1/audit", get(audit_events))
         .route("/v1/wsl/status", get(wsl_status))
         .route("/v1/wsl/action", post(wsl_action))
@@ -401,6 +402,91 @@ async fn route_switch(
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
         response.summary = format!("Switched active route to {}.", request.profile_id);
+    }
+
+    Ok(Json(response))
+}
+
+async fn route_rollback(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<RouteRollbackRequest>,
+) -> ApiResult<OperationResponse> {
+    require_auth(&state, &headers)?;
+    let active = state.store.active_route().map_err(|err| {
+        tracing::warn!(error = %err, "failed to read route state for rollback");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let profile_id = active
+        .last_known_good_profile_id
+        .ok_or(StatusCode::CONFLICT)?;
+
+    let config = load_config_dir(&*state.config_dir).map_err(|err| {
+        tracing::warn!(error = %err, "failed to load route rollback config");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let provider = config
+        .providers
+        .providers
+        .into_iter()
+        .find(|provider| provider.id == profile_id)
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let mut plan = route_switch_plan(
+        &config.control.wsl.distro,
+        &config.control.wsl.default_user,
+        &provider,
+    )
+    .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    plan.summary = format!(
+        "Rollback active route to {} and apply Hermes provider profile.",
+        provider.id
+    );
+
+    if request.dry_run {
+        return Ok(Json(OperationResponse {
+            status: "dry_run".to_owned(),
+            risk: RiskLevel::NormalMutating,
+            summary: plan.summary,
+            dry_run: true,
+            commands: plan.commands,
+            output: None,
+            confirmation_id: None,
+            code_hint: None,
+            expires_at: None,
+        }));
+    }
+
+    if matches!(provider.kind, AiProviderKind::LocalVllm) {
+        let status = collect_read_only_status(&*state.config_dir)
+            .await
+            .map_err(|err| {
+                tracing::warn!(error = %err, "failed to collect rollback local route readiness");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        if !local_vllm_provider_ready(&provider, &status) {
+            return Err(StatusCode::CONFLICT);
+        }
+    }
+
+    if state.store.has_active_operation().map_err(|err| {
+        tracing::warn!(error = %err, "failed to check operation lock");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })? {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    let action = format!("route::rollback::{profile_id}");
+    let mut response = execute_route_apply_operation(&state, &request.requester, &action, plan)?;
+    if response.status == "completed" {
+        state
+            .store
+            .switch_route(&request.requester, &profile_id, &request.reason)
+            .map_err(|err| {
+                tracing::warn!(error = %err, "failed to persist active route after rollback");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        response.summary = format!("Rolled active route back to {profile_id}.");
     }
 
     Ok(Json(response))

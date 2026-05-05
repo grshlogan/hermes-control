@@ -61,6 +61,12 @@ HERMES_ENV_FILE=/root/.hermes/.env
 OPENWEBUI_DATA_DIR=/root/Hermres/open-webui-data
 OPENWEBUI_DB_FILE=/root/Hermres/open-webui-data/webui.db
 OPENWEBUI_BACKUP_DIR=/root/Hermres/backups/open-webui
+OPENWEBUI_VENV_BIN=/root/Hermres/.venv-openwebui/bin/open-webui
+OPENWEBUI_HOST=0.0.0.0
+OPENWEBUI_PORT=3000
+OPENWEBUI_HEALTH_URL=http://127.0.0.1:3000/
+OPENWEBUI_HEALTH_TIMEOUT_SECONDS=10
+OPENWEBUI_PID_FILE=/run/hermes-control/open-webui.pid
 OPENWEBUI_HERMES_BASE_URL=http://127.0.0.1:8642/v1
 OPENWEBUI_DEFAULT_MODEL=hermes-agent
 OPENWEBUI_OPENAI_API_KEY_ENV=API_SERVER_KEY
@@ -95,6 +101,12 @@ set_runtime_env "VLLM_WORKSPACE" "$PROJECT_VLLM_WORKSPACE"
 set_runtime_env "OPENWEBUI_DATA_DIR" "/root/Hermres/open-webui-data"
 set_runtime_env "OPENWEBUI_DB_FILE" "/root/Hermres/open-webui-data/webui.db"
 set_runtime_env "OPENWEBUI_BACKUP_DIR" "/root/Hermres/backups/open-webui"
+set_runtime_env "OPENWEBUI_VENV_BIN" "/root/Hermres/.venv-openwebui/bin/open-webui"
+set_runtime_env "OPENWEBUI_HOST" "0.0.0.0"
+set_runtime_env "OPENWEBUI_PORT" "3000"
+set_runtime_env "OPENWEBUI_HEALTH_URL" "http://127.0.0.1:3000/"
+set_runtime_env "OPENWEBUI_HEALTH_TIMEOUT_SECONDS" "10"
+set_runtime_env "OPENWEBUI_PID_FILE" "/run/hermes-control/open-webui.pid"
 set_runtime_env "OPENWEBUI_HERMES_BASE_URL" "http://127.0.0.1:8642/v1"
 set_runtime_env "OPENWEBUI_DEFAULT_MODEL" "hermes-agent"
 set_runtime_env "OPENWEBUI_OPENAI_API_KEY_ENV" "API_SERVER_KEY"

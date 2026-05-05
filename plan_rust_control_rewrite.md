@@ -1119,7 +1119,7 @@ Codex tasks:
 - Implement switch to Claude/DeepSeek/Codex profiles.
 - Implement switch to local vLLM profile with model readiness gate.
 
-Current status as of 2026-05-05:
+Current status as of 2026-05-06:
 
 - Phase 6 started from a state-only route switch skeleton and now applies route
   configuration through fixed WSL root helpers before state is updated.
@@ -1144,13 +1144,24 @@ Current status as of 2026-05-05:
 - Route apply now invokes a product-owned Open WebUI sync helper that backs up
   `webui.db`, points Open WebUI's OpenAI backend at Hermes gateway, and keeps
   secret values out of daemon previews/output.
-- This increment does not yet hot-reload/restart a running Open WebUI process
-  or run a full last-known-good rollback flow after later post-switch failures.
+- Route apply now invokes a product-owned Open WebUI refresh helper after sync.
+  If Open WebUI is already running, the helper restarts it with the Hermes
+  gateway route env; if it is not running, refresh is skipped without starting a
+  new UI process.
+- If Open WebUI refresh fails after DB sync, route apply restores the Open WebUI
+  database from the sync backup, restores the previous Hermes env, restarts
+  Hermes, and attempts to restart Open WebUI with the restored route env.
+- Explicit rollback is now exposed through daemon `POST /v1/route/rollback`,
+  CLI `hermes-control route rollback`, and Telegram `/rollback`. It replays the
+  last-known-good provider through the same route apply helper before advancing
+  active route state.
 
 Completion signal:
 
 - Route switch never leaves Hermes in unknown provider state.
 - Local vLLM route waits for model ready before switching.
+- Explicit rollback can replay the last-known-good profile through the same
+  checked route apply path.
 
 ### Phase 7 — Teloxide Bot
 

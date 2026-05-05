@@ -104,6 +104,150 @@ async fn route_switch_updates_active_route_and_last_known_good() {
 }
 
 #[tokio::test]
+async fn route_rollback_dry_run_uses_last_known_good_without_mutating_active_route() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let first = post_json(
+        router.clone(),
+        "/v1/route/switch",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase6-test"},
+            "profile_id": "external.test",
+            "reason": "phase6 first switch",
+            "dry_run": false
+        }),
+    )
+    .await;
+    assert_eq!(first["status"], "completed");
+
+    let second = post_json(
+        router.clone(),
+        "/v1/route/switch",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase6-test"},
+            "profile_id": "external.backup",
+            "reason": "phase6 second switch",
+            "dry_run": false
+        }),
+    )
+    .await;
+    assert_eq!(second["status"], "completed");
+
+    let rollback = post_json(
+        router.clone(),
+        "/v1/route/rollback",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase6-test"},
+            "reason": "phase6 rollback dry-run",
+            "dry_run": true
+        }),
+    )
+    .await;
+
+    assert_eq!(rollback["status"], "dry_run");
+    assert!(
+        rollback["summary"]
+            .as_str()
+            .unwrap()
+            .contains("Rollback active route to external.test")
+    );
+    assert_eq!(
+        rollback["commands"][0]["args"],
+        json!([
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "root",
+            "--exec",
+            "/opt/hermes-control/bin/hermes-control-route-apply.sh",
+            "external.test",
+            "openai-compatible",
+            "https://example.com/v1",
+            "test-model",
+            "LM_API_KEY"
+        ])
+    );
+
+    let active = get_json(router, "/v1/route/active").await;
+    assert_eq!(active["active_profile_id"], "external.backup");
+    assert_eq!(active["last_known_good_profile_id"], "external.test");
+}
+
+#[tokio::test]
+async fn route_rollback_applies_last_known_good_route() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let first = post_json(
+        router.clone(),
+        "/v1/route/switch",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase6-test"},
+            "profile_id": "external.test",
+            "reason": "phase6 first switch",
+            "dry_run": false
+        }),
+    )
+    .await;
+    assert_eq!(first["status"], "completed");
+
+    let second = post_json(
+        router.clone(),
+        "/v1/route/switch",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase6-test"},
+            "profile_id": "external.backup",
+            "reason": "phase6 second switch",
+            "dry_run": false
+        }),
+    )
+    .await;
+    assert_eq!(second["status"], "completed");
+
+    let rollback = post_json(
+        router.clone(),
+        "/v1/route/rollback",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase6-test"},
+            "reason": "phase6 rollback",
+            "dry_run": false
+        }),
+    )
+    .await;
+
+    assert_eq!(rollback["status"], "completed");
+    assert_eq!(
+        rollback["summary"],
+        "Rolled active route back to external.test."
+    );
+
+    let active = get_json(router, "/v1/route/active").await;
+    assert_eq!(active["active_profile_id"], "external.test");
+    assert_eq!(active["last_known_good_profile_id"], "external.backup");
+    assert_eq!(row_count(&fixture.audit_db, "audit_events"), 3);
+}
+
+#[tokio::test]
+async fn route_rollback_without_last_known_good_is_rejected() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let response = post_raw_json(
+        router,
+        "/v1/route/rollback",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase6-test"},
+            "reason": "phase6 rollback unavailable",
+            "dry_run": false
+        }),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
 async fn route_switch_to_unready_local_vllm_is_rejected() {
     let fixture = Fixture::new();
     let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
