@@ -67,6 +67,9 @@ This map explains where to work in the Hermes Control Rust workspace.
   - Phase 6 route switch route: `/v1/route/switch` validates provider IDs,
     stores active/last-known-good route state, audits the switch, and gates
     local vLLM profiles on readiness.
+  - Route switch execution now plans the fixed WSL root
+    `hermes-control-route-apply.sh` helper and writes active route state only
+    after the helper succeeds.
   - Confirmation/cancel endpoints and pending operation lock.
   - Confirm responses expose executor outcome status, while failed outcomes are
     stored in operation state and release the lock.
@@ -88,6 +91,9 @@ This map explains where to work in the Hermes Control Rust workspace.
     `/etc/hermes-control/runtime.env`.
   - Helpers start, stop, restart, kill, health-check, and status-check the
     Hermes gateway without relying on legacy `/root/Hermres/*.sh` scripts.
+  - `hermes-control-route-apply.sh` atomically patches non-secret Hermes route
+    env keys, restarts Hermes, health-checks it, and restores the previous env
+    file if the apply step fails.
   - vLLM helpers start/stop/health/log/benchmark fixed model runtime operations
     through the same root-side package. Benchmark is a reserved helper.
   - `hermes-control-vllm-start-with-fallback.sh` tries a primary MTP variant and
@@ -167,7 +173,8 @@ This map explains where to work in the Hermes Control Rust workspace.
   previews, initial vLLM action previews, immediate execution for normal
   mutating actions, Windows command allowlist enforcement, and stdout capture.
 - `crates/hermes-control-daemon/tests/phase6_route_switch.rs`: Phase 6 route
-  switch state, last-known-good tracking, audit, and local vLLM readiness gate.
+  switch command previews, state, last-known-good tracking, audit, local vLLM
+  readiness gate, and "do not update active route after apply failure" behavior.
 
 ## Where To Make Changes
 

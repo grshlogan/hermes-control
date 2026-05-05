@@ -18,6 +18,7 @@ fn wsl_root_install_assets_define_canonical_helper_contract() {
         "hermes-control-start.sh",
         "hermes-control-stop.sh",
         "hermes-control-restart.sh",
+        "hermes-control-route-apply.sh",
         "hermes-control-kill.sh",
         "hermes-control-health.sh",
         "hermes-control-status.sh",

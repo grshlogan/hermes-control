@@ -56,6 +56,9 @@ struct DaemonStateStore {
 
 type ApiResult<T> = Result<Json<T>, StatusCode>;
 
+const HERMES_CONTROL_WSL_BIN: &str = "/opt/hermes-control/bin";
+const HERMES_CONTROL_ROUTE_APPLY_SCRIPT: &str = "hermes-control-route-apply.sh";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutableOperation {
     pub id: String,
@@ -347,19 +350,20 @@ async fn route_switch(
         .find(|provider| provider.id == request.profile_id)
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let summary = if request.dry_run {
-        format!("Switch active route to {}.", request.profile_id)
-    } else {
-        format!("Switched active route to {}.", request.profile_id)
-    };
+    let plan = route_switch_plan(
+        &config.control.wsl.distro,
+        &config.control.wsl.default_user,
+        &provider,
+    )
+    .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if request.dry_run {
         return Ok(Json(OperationResponse {
             status: "dry_run".to_owned(),
             risk: RiskLevel::NormalMutating,
-            summary,
+            summary: plan.summary,
             dry_run: true,
-            commands: Vec::new(),
+            commands: plan.commands,
             output: None,
             confirmation_id: None,
             code_hint: None,
@@ -387,31 +391,19 @@ async fn route_switch(
     }
 
     let action = format!("route::switch::{}", request.profile_id);
-    state
-        .store
-        .switch_route(
-            &request.requester,
-            &action,
-            &request.profile_id,
-            &request.reason,
-            &summary,
-        )
-        .map_err(|err| {
-            tracing::warn!(error = %err, "failed to switch active route");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let mut response = execute_route_apply_operation(&state, &request.requester, &action, plan)?;
+    if response.status == "completed" {
+        state
+            .store
+            .switch_route(&request.requester, &request.profile_id, &request.reason)
+            .map_err(|err| {
+                tracing::warn!(error = %err, "failed to persist active route after apply");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        response.summary = format!("Switched active route to {}.", request.profile_id);
+    }
 
-    Ok(Json(OperationResponse {
-        status: "completed".to_owned(),
-        risk: RiskLevel::NormalMutating,
-        summary,
-        dry_run: false,
-        commands: Vec::new(),
-        output: None,
-        confirmation_id: None,
-        code_hint: None,
-        expires_at: None,
-    }))
+    Ok(Json(response))
 }
 
 fn local_vllm_provider_ready(provider: &ProviderConfig, status: &ReadOnlyStatus) -> bool {
@@ -425,6 +417,110 @@ fn local_vllm_provider_ready(provider: &ProviderConfig, status: &ReadOnlyStatus)
         model.runtime_id == *runtime_id
             && model.served_model_name == *served_model_name
             && model.ready
+    })
+}
+
+fn route_switch_plan(
+    distro: &str,
+    wsl_user: &str,
+    provider: &ProviderConfig,
+) -> Option<OperationPlan> {
+    let base_url = route_base_url(provider)?;
+    let model_id = route_model_id(provider)?;
+    let provider_kind = provider_kind_label(&provider.kind);
+    let args = vec![
+        "--distribution".to_owned(),
+        distro.to_owned(),
+        "--user".to_owned(),
+        wsl_user.to_owned(),
+        "--exec".to_owned(),
+        format!("{HERMES_CONTROL_WSL_BIN}/{HERMES_CONTROL_ROUTE_APPLY_SCRIPT}"),
+        provider.id.clone(),
+        provider_kind.to_owned(),
+        base_url,
+        model_id,
+    ];
+
+    Some(OperationPlan {
+        risk: RiskLevel::NormalMutating,
+        summary: format!(
+            "Switch active route to {} and apply Hermes provider profile.",
+            provider.id
+        ),
+        commands: vec![CommandPreview {
+            program: "wsl.exe".to_owned(),
+            args,
+        }],
+        requires_confirmation: false,
+    })
+}
+
+fn provider_kind_label(kind: &AiProviderKind) -> &'static str {
+    match kind {
+        AiProviderKind::OpenAiCompatible => "openai-compatible",
+        AiProviderKind::AnthropicClaude => "claude",
+        AiProviderKind::DeepSeek => "deepseek",
+        AiProviderKind::Codex => "codex",
+        AiProviderKind::LocalVllm => "local-vllm",
+        AiProviderKind::LmStudio => "lm-studio",
+        AiProviderKind::Disabled => "disabled",
+    }
+}
+
+fn route_base_url(provider: &ProviderConfig) -> Option<String> {
+    if matches!(&provider.kind, AiProviderKind::LocalVllm) {
+        return Some("auto-vllm".to_owned());
+    }
+
+    provider.base_url.clone()
+}
+
+fn route_model_id(provider: &ProviderConfig) -> Option<String> {
+    provider
+        .served_model_name
+        .clone()
+        .or_else(|| provider.models.first().cloned())
+}
+
+fn execute_route_apply_operation(
+    state: &AppState,
+    requester: &Requester,
+    action: &str,
+    plan: OperationPlan,
+) -> Result<OperationResponse, StatusCode> {
+    if state.store.has_active_operation().map_err(|err| {
+        tracing::warn!(error = %err, "failed to check operation lock");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })? {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    let operation = state
+        .store
+        .create_immediate_operation(requester, action, &plan)
+        .map_err(|err| {
+            tracing::warn!(error = %err, "failed to create route apply operation");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    let outcome = state.executor.execute(&operation);
+    state
+        .store
+        .complete_operation(&operation, &outcome, requester)
+        .map_err(|err| {
+            tracing::warn!(error = %err, "failed to complete route apply operation");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(OperationResponse {
+        status: outcome.status,
+        risk: plan.risk,
+        summary: outcome.summary,
+        dry_run: false,
+        commands: plan.commands,
+        output: outcome.output,
+        confirmation_id: None,
+        code_hint: None,
+        expires_at: None,
     })
 }
 
@@ -829,12 +925,9 @@ impl DaemonStateStore {
     fn switch_route(
         &self,
         requester: &Requester,
-        action: &str,
         profile_id: &str,
         reason: &str,
-        summary: &str,
     ) -> Result<(), DaemonError> {
-        let operation_id = format!("op_{}", unix_epoch_nanos());
         let connection = Connection::open(&*self.state_db)?;
         let current_route = connection
             .query_row(
@@ -866,22 +959,7 @@ impl DaemonStateStore {
                 reason,
             ),
         )?;
-        connection.execute(
-            "
-            INSERT INTO operation_state (
-                id, action, status, requester_channel, requester_user_id, summary, commands_json
-            )
-            VALUES (?1, ?2, 'completed', ?3, ?4, ?5, '[]')
-            ",
-            (
-                &operation_id,
-                action,
-                requester_channel_label(&requester.channel),
-                &requester.user_id,
-                summary,
-            ),
-        )?;
-        self.append_audit_summary(requester, action, "NormalMutating", summary)
+        Ok(())
     }
 
     fn audit_events(&self, limit: usize) -> Result<Vec<AuditEventSummary>, DaemonError> {
@@ -1296,16 +1374,22 @@ fn is_allowlisted_hermes_script(user: &str, script: &str, args: &[String]) -> bo
         return false;
     };
 
-    if args.is_empty() {
-        matches!(
-            script_name,
+    match (script_name, args) {
+        (
             "hermes-control-start.sh"
-                | "hermes-control-stop.sh"
-                | "hermes-control-restart.sh"
-                | "hermes-control-kill.sh"
-        )
-    } else {
-        script_name == "hermes-control-health.sh" && args == ["30", "ready"]
+            | "hermes-control-stop.sh"
+            | "hermes-control-restart.sh"
+            | "hermes-control-kill.sh",
+            [],
+        ) => true,
+        ("hermes-control-health.sh", [timeout, mode]) => timeout == "30" && mode == "ready",
+        ("hermes-control-route-apply.sh", [profile_id, provider_kind, base_url, model_id]) => {
+            is_safe_identifier(profile_id)
+                && is_safe_provider_kind(provider_kind)
+                && is_safe_route_base_url(base_url)
+                && is_safe_identifier(model_id)
+        }
+        _ => false,
     }
 }
 
@@ -1343,6 +1427,22 @@ fn is_safe_identifier(value: &str) -> bool {
         && value
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+}
+
+fn is_safe_provider_kind(value: &str) -> bool {
+    matches!(
+        value,
+        "openai-compatible" | "claude" | "deepseek" | "codex" | "local-vllm" | "lm-studio"
+    )
+}
+
+fn is_safe_route_base_url(value: &str) -> bool {
+    value == "auto-vllm"
+        || (!value.is_empty()
+            && value.len() <= 512
+            && value
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':' | '/')))
 }
 
 fn unix_epoch_nanos() -> u128 {

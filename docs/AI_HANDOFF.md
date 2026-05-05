@@ -117,8 +117,12 @@ Phase 6 has started:
   `route switch <profile-id>` posts a typed `RouteSwitchRequest`.
 - Local vLLM route switches are blocked unless the configured served model is
   ready.
-- Hermes/Open WebUI config patching, Hermes reload/restart, and rollback after
-  failed reload are still pending Phase 6 work.
+- Route switch now executes the fixed WSL root
+  `hermes-control-route-apply.sh` helper before active route state is updated.
+- The helper atomically patches non-secret Hermes route env keys, restarts
+  Hermes, health-checks it, and restores the previous env file on failure.
+- Provider secret-ref resolution, Open WebUI sync, and full last-known-good
+  rollback after later failures are still pending Phase 6 work.
 
 ## Current Runtime Observation
 
@@ -160,6 +164,7 @@ Phase 6 has started. Current local unpushed work:
 - Daemon route switch endpoint and CLI route switch command.
 - Route state stores active and last-known-good profile IDs.
 - Local vLLM route readiness gate.
+- Fixed Hermes route apply helper and executor allowlist support.
 
 ## Useful Commands
 
@@ -223,5 +228,8 @@ cargo run -p hermes-control-cli -- --api-token phase6-token route switch externa
   change.
 - Phase 6 should next implement Hermes provider config patch/reload and rollback
   around the already-persisted route state.
+- After the 2026-05-05 increment, active route state is no longer written until
+  the fixed Hermes route apply helper succeeds. Next work should resolve
+  provider secrets and sync Open WebUI.
 - Tauri belongs in Phase 8 as a GUI shell and typed daemon client only.
 - Ask for explicit approval before commit and push.

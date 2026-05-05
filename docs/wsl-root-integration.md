@@ -25,6 +25,7 @@ wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/
 wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-restart.sh
 wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-kill.sh
 wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-health.sh 30 ready
+wsl.exe --distribution <safe-distro> --user root --exec /opt/hermes-control/bin/hermes-control-route-apply.sh <profile-id> <provider-kind> <base-url|auto-vllm> <model-id>
 ```
 
 No legacy `/root/Hermres/*.sh` script is part of the daemon allowlist.
@@ -56,6 +57,7 @@ scripts/wsl-root/
     hermes-control-restart.sh
     hermes-control-kill.sh
     hermes-control-health.sh
+    hermes-control-route-apply.sh
     hermes-control-status.sh
     hermes-control-vllm-start.sh
     hermes-control-vllm-start-with-fallback.sh
@@ -140,6 +142,24 @@ wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-con
 
 The status and health helpers emit JSON. The daemon does not depend on legacy
 process probes such as `service-status.sh`.
+
+Apply a Hermes route profile through the fixed helper:
+
+```powershell
+wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-route-apply.sh external.openai-compatible openai-compatible https://example.com/v1 gpt-like-coder
+```
+
+For local vLLM, pass `auto-vllm` as the base URL. The helper resolves it to the
+WSL primary IP plus `VLLM_PORT`:
+
+```powershell
+wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-route-apply.sh local.vllm.qwen36-mtp local-vllm auto-vllm qwen36-mtp
+```
+
+The route helper writes non-secret route env keys into `HERMES_ENV_FILE`, keeps a
+`.hermes-control-route.bak` backup, restarts Hermes, and checks health. If
+restart or health fails, it restores the previous env file and attempts to bring
+Hermes back on the previous config.
 
 Check vLLM readiness without starting a model:
 

@@ -23,6 +23,7 @@ Hermes Control 是一个面向 Windows + WSL2 的本地 AI 控制器。它的目
 - Hermes gateway 调用本地模型实测。
 - Open WebUI 经 Hermes gateway 调用本地模型实测。
 - daemon/CLI 级 route active 与 route switch 状态骨架。
+- 固定 WSL root route-apply helper：切换前应用 Hermes env patch、重启并健康检查。
 
 仍在规划或后续阶段：
 
@@ -171,7 +172,7 @@ cargo run -p hermes-control-cli -- --api-token <token> route active
 cargo run -p hermes-control-cli -- --api-token <token> route switch external.openai-compatible --dry-run --reason "smoke"
 ```
 
-这一步会验证 provider、维护 active route 和 last-known-good route，并在切到 local vLLM profile 时检查模型 ready。它暂时还不会自动改 Hermes/Open WebUI 配置；这正是 Phase 6 下一步。
+这一步会验证 provider、在切到 local vLLM profile 时检查模型 ready，并先通过 WSL root helper 应用 Hermes route env patch。只有 helper 重启 Hermes 并通过健康检查后，daemon 才会维护 active route 和 last-known-good route。Open WebUI 同步和 provider secret-ref 自动解析仍是后续 Phase6 工作。
 
 ## 文档入口
 

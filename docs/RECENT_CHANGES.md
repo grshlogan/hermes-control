@@ -319,3 +319,17 @@ unimplemented ideas here.
   vLLM readiness gating.
 - Route switching is currently state-only; Hermes/Open WebUI config patching,
   hot reload/restart, and rollback remain later Phase 6 work.
+
+## 2026-05-05: Phase 6 Hermes route apply boundary
+
+- Added WSL root helper `hermes-control-route-apply.sh` for fixed Hermes route
+  profile application.
+- Route switch dry-runs now show the exact fixed `wsl.exe --exec
+  /opt/hermes-control/bin/hermes-control-route-apply.sh ...` command preview.
+- Non-dry-run route switches now execute the route-apply operation first and
+  persist active route state only after the helper succeeds.
+- The route helper writes only non-secret route env keys, restarts Hermes,
+  checks health, and restores the previous Hermes env file on restart/health
+  failure.
+- The Windows command executor allowlist now accepts only this fixed route
+  apply helper shape with constrained profile/provider/base-url/model args.

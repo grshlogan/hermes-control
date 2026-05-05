@@ -8,7 +8,10 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode, header::AUTHORIZATION},
 };
-use hermes_control_daemon::build_router;
+use hermes_control_daemon::{
+    ExecutableOperation, ExecutionOutcome, OperationExecutor, build_router,
+    build_router_with_executor,
+};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -40,6 +43,21 @@ async fn route_switch_dry_run_validates_provider_without_mutating_active_route()
             .as_str()
             .unwrap()
             .contains("Switch active route to external.test")
+    );
+    assert_eq!(
+        response["commands"][0]["args"],
+        json!([
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "root",
+            "--exec",
+            "/opt/hermes-control/bin/hermes-control-route-apply.sh",
+            "external.test",
+            "openai-compatible",
+            "https://example.com/v1",
+            "test-model"
+        ])
     );
 
     let active = get_json(router, "/v1/route/active").await;
@@ -104,6 +122,34 @@ async fn route_switch_to_unready_local_vllm_is_rejected() {
     assert_eq!(response.status(), StatusCode::CONFLICT);
 }
 
+#[tokio::test]
+async fn route_switch_does_not_update_active_route_when_apply_fails() {
+    let fixture = Fixture::new();
+    let router = build_router_with_executor(
+        &fixture.config_dir,
+        TOKEN,
+        std::sync::Arc::new(FailingExecutor),
+    )
+    .expect("router should build");
+
+    let response = post_json(
+        router.clone(),
+        "/v1/route/switch",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase6-test"},
+            "profile_id": "external.test",
+            "reason": "phase6 failed apply",
+            "dry_run": false
+        }),
+    )
+    .await;
+
+    assert_eq!(response["status"], "failed");
+    let active = get_json(router, "/v1/route/active").await;
+    assert!(active["active_profile_id"].is_null());
+    assert!(active["last_known_good_profile_id"].is_null());
+}
+
 async fn get(router: Router, path: &str, token: Option<&str>) -> axum::response::Response {
     let mut request = Request::builder().uri(path);
     if let Some(token) = token {
@@ -162,6 +208,19 @@ struct Fixture {
     _temp: TempDir,
     config_dir: PathBuf,
     audit_db: PathBuf,
+}
+
+struct FailingExecutor;
+
+impl OperationExecutor for FailingExecutor {
+    fn execute(&self, operation: &ExecutableOperation) -> ExecutionOutcome {
+        assert_eq!(operation.commands.len(), 1);
+        ExecutionOutcome {
+            status: "failed".to_owned(),
+            summary: "simulated route apply failure".to_owned(),
+            output: None,
+        }
+    }
 }
 
 impl Fixture {

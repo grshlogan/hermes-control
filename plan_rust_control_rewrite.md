@@ -1129,8 +1129,16 @@ Current status as of 2026-05-03:
   `hermes-control route switch <profile-id>` posts typed `RouteSwitchRequest`.
 - Local vLLM profiles are gated on model readiness before the active route state
   can switch to them.
-- This increment does not yet patch Hermes provider env/config, hot-reload
-  Hermes, update Open WebUI, or perform rollback after a failed Hermes reload.
+- Route switching now emits and executes a fixed WSL root
+  `hermes-control-route-apply.sh` helper command before active route state is
+  updated.
+- The helper atomically updates non-secret Hermes route env keys, restarts
+  Hermes, checks health, and restores the previous env file if restart or
+  health fails.
+- Active route state is updated only after the route-apply operation completes
+  successfully.
+- This increment does not yet resolve provider secret refs, update Open WebUI,
+  or run a full last-known-good rollback flow after a later post-switch failure.
 
 Completion signal:
 

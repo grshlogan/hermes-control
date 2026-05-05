@@ -599,6 +599,21 @@ fn windows_executor_allows_fixed_hermes_wsl_scripts() {
                     "ready",
                 ],
             ),
+            command(
+                "wsl.exe",
+                [
+                    "--distribution",
+                    "Ubuntu-Hermes-Codex",
+                    "--user",
+                    "root",
+                    "--exec",
+                    "/opt/hermes-control/bin/hermes-control-route-apply.sh",
+                    "external.test",
+                    "openai-compatible",
+                    "https://example.com/v1",
+                    "test-model",
+                ],
+            ),
         ],
     };
 
