@@ -427,6 +427,7 @@ fn route_switch_plan(
 ) -> Option<OperationPlan> {
     let base_url = route_base_url(provider)?;
     let model_id = route_model_id(provider)?;
+    let secret_env_key = route_secret_env_key(provider)?;
     let provider_kind = provider_kind_label(&provider.kind);
     let args = vec![
         "--distribution".to_owned(),
@@ -439,6 +440,7 @@ fn route_switch_plan(
         provider_kind.to_owned(),
         base_url,
         model_id,
+        secret_env_key,
     ];
 
     Some(OperationPlan {
@@ -480,6 +482,22 @@ fn route_model_id(provider: &ProviderConfig) -> Option<String> {
         .served_model_name
         .clone()
         .or_else(|| provider.models.first().cloned())
+}
+
+fn route_secret_env_key(provider: &ProviderConfig) -> Option<String> {
+    if matches!(&provider.kind, AiProviderKind::LocalVllm) {
+        return Some("none".to_owned());
+    }
+
+    let _secret_ref = provider.api_key_ref.as_ref()?;
+    let env_key = match provider.kind {
+        AiProviderKind::OpenAiCompatible | AiProviderKind::LmStudio => "LM_API_KEY",
+        AiProviderKind::DeepSeek => "DEEPSEEK_API_KEY",
+        AiProviderKind::AnthropicClaude => "ANTHROPIC_AUTH_TOKEN",
+        AiProviderKind::Codex => "CODEX_API_KEY",
+        AiProviderKind::LocalVllm | AiProviderKind::Disabled => return None,
+    };
+    Some(env_key.to_owned())
 }
 
 fn execute_route_apply_operation(
@@ -1383,11 +1401,21 @@ fn is_allowlisted_hermes_script(user: &str, script: &str, args: &[String]) -> bo
             [],
         ) => true,
         ("hermes-control-health.sh", [timeout, mode]) => timeout == "30" && mode == "ready",
-        ("hermes-control-route-apply.sh", [profile_id, provider_kind, base_url, model_id]) => {
+        (
+            "hermes-control-route-apply.sh",
+            [
+                profile_id,
+                provider_kind,
+                base_url,
+                model_id,
+                secret_env_key,
+            ],
+        ) => {
             is_safe_identifier(profile_id)
                 && is_safe_provider_kind(provider_kind)
                 && is_safe_route_base_url(base_url)
                 && is_safe_identifier(model_id)
+                && is_safe_secret_env_key(secret_env_key)
         }
         _ => false,
     }
@@ -1443,6 +1471,17 @@ fn is_safe_route_base_url(value: &str) -> bool {
             && value
                 .chars()
                 .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':' | '/')))
+}
+
+fn is_safe_secret_env_key(value: &str) -> bool {
+    value == "none"
+        || (!value.is_empty()
+            && value.len() <= 128
+            && value.chars().enumerate().all(|(index, ch)| {
+                ch.is_ascii_uppercase()
+                    || ch.is_ascii_digit() && index > 0
+                    || ch == '_' && index > 0
+            }))
 }
 
 fn unix_epoch_nanos() -> u128 {

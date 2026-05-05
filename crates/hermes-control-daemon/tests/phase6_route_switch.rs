@@ -56,7 +56,8 @@ async fn route_switch_dry_run_validates_provider_without_mutating_active_route()
             "external.test",
             "openai-compatible",
             "https://example.com/v1",
-            "test-model"
+            "test-model",
+            "LM_API_KEY"
         ])
     );
 
@@ -120,6 +121,41 @@ async fn route_switch_to_unready_local_vllm_is_rejected() {
     .await;
 
     assert_eq!(response.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn local_vllm_route_preview_uses_no_secret_env_key() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let response = post_json(
+        router,
+        "/v1/route/switch",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase6-test"},
+            "profile_id": "local.vllm.qwen36-mtp",
+            "reason": "phase6 local dry-run",
+            "dry_run": true
+        }),
+    )
+    .await;
+
+    assert_eq!(
+        response["commands"][0]["args"],
+        json!([
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "root",
+            "--exec",
+            "/opt/hermes-control/bin/hermes-control-route-apply.sh",
+            "local.vllm.qwen36-mtp",
+            "local-vllm",
+            "auto-vllm",
+            "qwen36-mtp",
+            "none"
+        ])
+    );
 }
 
 #[tokio::test]

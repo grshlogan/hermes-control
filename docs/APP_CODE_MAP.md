@@ -70,6 +70,9 @@ This map explains where to work in the Hermes Control Rust workspace.
   - Route switch execution now plans the fixed WSL root
     `hermes-control-route-apply.sh` helper and writes active route state only
     after the helper succeeds.
+  - Provider `api_key_ref` values are resolved only to controlled Hermes env key
+    names for route application; raw secret values stay out of daemon requests,
+    responses, command previews, and audit rows.
   - Confirmation/cancel endpoints and pending operation lock.
   - Confirm responses expose executor outcome status, while failed outcomes are
     stored in operation state and release the lock.
@@ -94,6 +97,11 @@ This map explains where to work in the Hermes Control Rust workspace.
   - `hermes-control-route-apply.sh` atomically patches non-secret Hermes route
     env keys, restarts Hermes, health-checks it, and restores the previous env
     file if the apply step fails.
+  - The route helper validates the referenced secret env key inside WSL/Hermes
+    env scope and copies it to the provider-family runtime key locally.
+  - `hermes-control-openwebui-sync.sh` backs up Open WebUI `webui.db` and points
+    its OpenAI backend/default model at Hermes gateway without printing API
+    keys.
   - vLLM helpers start/stop/health/log/benchmark fixed model runtime operations
     through the same root-side package. Benchmark is a reserved helper.
   - `hermes-control-vllm-start-with-fallback.sh` tries a primary MTP variant and
@@ -175,6 +183,8 @@ This map explains where to work in the Hermes Control Rust workspace.
 - `crates/hermes-control-daemon/tests/phase6_route_switch.rs`: Phase 6 route
   switch command previews, state, last-known-good tracking, audit, local vLLM
   readiness gate, and "do not update active route after apply failure" behavior.
+- `tests/wsl-root/openwebui_sync.sh`: WSL helper smoke test for Open WebUI
+  persistent config sync and secret redaction.
 
 ## Where To Make Changes
 

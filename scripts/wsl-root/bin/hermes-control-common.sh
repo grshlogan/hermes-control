@@ -74,6 +74,12 @@ hc_extend_no_proxy_for_vllm() {
 : "${HERMES_PID_DIR:=/run/hermes-control}"
 : "${HERMES_PID_FILE:=${HERMES_PID_DIR}/hermes-gateway.pid}"
 : "${HERMES_ENV_FILE:=${HOME}/.hermes/.env}"
+: "${OPENWEBUI_DATA_DIR:=${HERMES_CONTROL_WORK_ROOT}/open-webui-data}"
+: "${OPENWEBUI_DB_FILE:=${OPENWEBUI_DATA_DIR}/webui.db}"
+: "${OPENWEBUI_BACKUP_DIR:=${HERMES_CONTROL_WORK_ROOT}/backups/open-webui}"
+: "${OPENWEBUI_HERMES_BASE_URL:=http://127.0.0.1:8642/v1}"
+: "${OPENWEBUI_DEFAULT_MODEL:=hermes-agent}"
+: "${OPENWEBUI_OPENAI_API_KEY_ENV:=API_SERVER_KEY}"
 : "${VLLM_WORKSPACE:=/mnt/e/WSL/Hermres/hermes-control/vLLM}"
 : "${VLLM_MODEL_ROOT:=/mnt/e/WSL/vLLM/models}"
 : "${VLLM_PORT:=18080}"
@@ -96,7 +102,7 @@ hc_require_root() {
 }
 
 hc_prepare_dirs() {
-  mkdir -p "$HERMES_LOG_DIR" "$HERMES_PID_DIR" "$VLLM_LOG_DIR" "$VLLM_PID_DIR" "$VLLM_MODEL_ROOT"
+  mkdir -p "$HERMES_LOG_DIR" "$HERMES_PID_DIR" "$OPENWEBUI_BACKUP_DIR" "$VLLM_LOG_DIR" "$VLLM_PID_DIR" "$VLLM_MODEL_ROOT"
 }
 
 hc_load_hermes_env() {

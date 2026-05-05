@@ -1119,9 +1119,10 @@ Codex tasks:
 - Implement switch to Claude/DeepSeek/Codex profiles.
 - Implement switch to local vLLM profile with model readiness gate.
 
-Current status as of 2026-05-03:
+Current status as of 2026-05-05:
 
-- Phase 6 has started with a state-only route switch skeleton.
+- Phase 6 started from a state-only route switch skeleton and now applies route
+  configuration through fixed WSL root helpers before state is updated.
 - Daemon `POST /v1/route/switch` validates the requested provider profile,
   supports dry-run, persists `active_profile_id`, records
   `last_known_good_profile_id`, and writes audit/operation records.
@@ -1137,8 +1138,14 @@ Current status as of 2026-05-03:
   health fails.
 - Active route state is updated only after the route-apply operation completes
   successfully.
-- This increment does not yet resolve provider secret refs, update Open WebUI,
-  or run a full last-known-good rollback flow after a later post-switch failure.
+- Provider `api_key_ref` now resolves to a controlled Hermes-side environment
+  variable name, such as `LM_API_KEY`, and only that env key name is passed to
+  the WSL helper. Raw secret values stay inside WSL/Hermes env scope.
+- Route apply now invokes a product-owned Open WebUI sync helper that backs up
+  `webui.db`, points Open WebUI's OpenAI backend at Hermes gateway, and keeps
+  secret values out of daemon previews/output.
+- This increment does not yet hot-reload/restart a running Open WebUI process
+  or run a full last-known-good rollback flow after later post-switch failures.
 
 Completion signal:
 

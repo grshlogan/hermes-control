@@ -612,6 +612,7 @@ fn windows_executor_allows_fixed_hermes_wsl_scripts() {
                     "openai-compatible",
                     "https://example.com/v1",
                     "test-model",
+                    "LM_API_KEY",
                 ],
             ),
         ],

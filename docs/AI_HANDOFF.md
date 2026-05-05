@@ -7,8 +7,9 @@ destructive-action confirmation records, confirm/cancel endpoints, and a pending
 operation lock. Confirmed operations flow through an injectable executor
 abstraction. Phase 5 basic vLLM runtime control is now closed out, including
 project-owned vLLM provisioning, live qwen36 MTP validation, daemon-backed
-`model logs`, and AWQ fallback start planning. Phase 6 has started with a
-state-only route switch skeleton.
+`model logs`, and AWQ fallback start planning. Phase 6 route switching now
+applies Hermes route env patches and persists Open WebUI's Hermes-backed route
+config before updating daemon route state.
 
 ## Phase Report
 
@@ -121,8 +122,14 @@ Phase 6 has started:
   `hermes-control-route-apply.sh` helper before active route state is updated.
 - The helper atomically patches non-secret Hermes route env keys, restarts
   Hermes, health-checks it, and restores the previous env file on failure.
-- Provider secret-ref resolution, Open WebUI sync, and full last-known-good
-  rollback after later failures are still pending Phase 6 work.
+- Provider `api_key_ref` now resolves to a controlled WSL/Hermes env key name,
+  such as `LM_API_KEY`, `DEEPSEEK_API_KEY`, or `ANTHROPIC_AUTH_TOKEN`; raw secret
+  values still never pass through the daemon.
+- Route apply now calls a product-owned Open WebUI sync helper that backs up
+  `webui.db`, points Open WebUI at Hermes gateway, and avoids printing API
+  keys.
+- Live Open WebUI hot reload/restart and full last-known-good rollback after
+  later failures are still pending Phase 6 work.
 
 ## Current Runtime Observation
 
@@ -165,6 +172,8 @@ Phase 6 has started. Current local unpushed work:
 - Route state stores active and last-known-good profile IDs.
 - Local vLLM route readiness gate.
 - Fixed Hermes route apply helper and executor allowlist support.
+- Provider secret env-key routing for external route profiles.
+- Open WebUI persistent config sync helper.
 
 ## Useful Commands
 
@@ -226,10 +235,10 @@ cargo run -p hermes-control-cli -- --api-token phase6-token route switch externa
 
 - Keep `docs/RECENT_CHANGES.md` updated after each landed conversation-level
   change.
-- Phase 6 should next implement Hermes provider config patch/reload and rollback
-  around the already-persisted route state.
+- Phase 6 should next implement live Open WebUI refresh/restart policy and
+  broader rollback around the already-persisted route state.
 - After the 2026-05-05 increment, active route state is no longer written until
-  the fixed Hermes route apply helper succeeds. Next work should resolve
-  provider secrets and sync Open WebUI.
+  the fixed Hermes route apply helper succeeds. Next work should resolve live
+  refresh and broader rollback semantics.
 - Tauri belongs in Phase 8 as a GUI shell and typed daemon client only.
 - Ask for explicit approval before commit and push.

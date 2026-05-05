@@ -333,3 +333,25 @@ unimplemented ideas here.
   failure.
 - The Windows command executor allowlist now accepts only this fixed route
   apply helper shape with constrained profile/provider/base-url/model args.
+
+## 2026-05-05: Phase 6 provider secret-ref route boundary
+
+- Extended route switch planning so `api_key_ref` is resolved to a controlled
+  Hermes-side environment variable name, not to the raw secret value.
+- Route apply command previews now include only the secret env key name, such as
+  `LM_API_KEY`, or `none` for local vLLM profiles.
+- Updated `hermes-control-route-apply.sh` to validate that the named secret env
+  key exists inside the WSL/Hermes env scope before restarting Hermes.
+- The helper copies the secret value only inside WSL into the Hermes runtime env
+  variable expected by the selected provider family; the daemon never receives
+  or logs the raw key.
+
+## 2026-05-05: Phase 6 Open WebUI route sync boundary
+
+- Added `hermes-control-openwebui-sync.sh` to back up Open WebUI `webui.db` and
+  persist its OpenAI backend/default model through Hermes gateway.
+- Route apply now writes Open WebUI route env hints, runs the sync helper after
+  Hermes health succeeds, and rolls Hermes env back if the sync helper fails.
+- Added a WSL-side smoke test proving Open WebUI config sync does not print raw
+  API keys.
+- Live Open WebUI process refresh/restart remains later Phase 6 work.

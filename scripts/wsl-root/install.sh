@@ -58,6 +58,12 @@ HERMES_LOG_DIR=/root/Hermres/logs
 HERMES_PID_DIR=/run/hermes-control
 HERMES_PID_FILE=/run/hermes-control/hermes-gateway.pid
 HERMES_ENV_FILE=/root/.hermes/.env
+OPENWEBUI_DATA_DIR=/root/Hermres/open-webui-data
+OPENWEBUI_DB_FILE=/root/Hermres/open-webui-data/webui.db
+OPENWEBUI_BACKUP_DIR=/root/Hermres/backups/open-webui
+OPENWEBUI_HERMES_BASE_URL=http://127.0.0.1:8642/v1
+OPENWEBUI_DEFAULT_MODEL=hermes-agent
+OPENWEBUI_OPENAI_API_KEY_ENV=API_SERVER_KEY
 VLLM_WORKSPACE=/mnt/e/WSL/Hermres/hermes-control/vLLM
 VLLM_MODEL_ROOT=/mnt/e/WSL/vLLM/models
 VLLM_PORT=18080
@@ -86,6 +92,12 @@ set_runtime_env() {
 }
 
 set_runtime_env "VLLM_WORKSPACE" "$PROJECT_VLLM_WORKSPACE"
+set_runtime_env "OPENWEBUI_DATA_DIR" "/root/Hermres/open-webui-data"
+set_runtime_env "OPENWEBUI_DB_FILE" "/root/Hermres/open-webui-data/webui.db"
+set_runtime_env "OPENWEBUI_BACKUP_DIR" "/root/Hermres/backups/open-webui"
+set_runtime_env "OPENWEBUI_HERMES_BASE_URL" "http://127.0.0.1:8642/v1"
+set_runtime_env "OPENWEBUI_DEFAULT_MODEL" "hermes-agent"
+set_runtime_env "OPENWEBUI_OPENAI_API_KEY_ENV" "API_SERVER_KEY"
 set_runtime_env "VLLM_MODEL_ROOT" "$EXTERNAL_VLLM_MODEL_ROOT"
 set_runtime_env "VLLM_PORT" "18080"
 set_runtime_env "VLLM_CLIENT_HOST" "auto"
