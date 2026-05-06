@@ -1171,6 +1171,10 @@ Completion signal:
 
 ### Phase 7 — Teloxide Bot
 
+Status: complete for the Rust bot code phase. Real Telegram token conversation
+smoke is a deployment/runtime verification step and must not store raw tokens in
+the repository.
+
 Goal:
 
 - Replace Python Telegram bot.
@@ -1191,12 +1195,20 @@ Codex tasks:
 - Write redacted bot runtime logs. Done for startup, command-menu publication,
   daemon request planning/failure, and invalid-command events through
   `logs/bot/bot.log`.
+- Keep the bot subprocess alive through transient Telegram failures. Done for
+  long-polling failures and message-send failures with redacted event logging
+  and configurable retry delay.
 
 Completion signal:
 
-- Bot stays responsive after Hermes restart.
-- Bot stays responsive after WSL restart.
-- Bot never executes shell directly.
+- Bot stays responsive after Hermes restart. Satisfied at the code boundary by
+  keeping the bot outside WSL and turning daemon failures into replies/logs
+  instead of process exits.
+- Bot stays responsive after WSL restart. Satisfied at the code boundary by
+  keeping the bot outside WSL, persisting Telegram offset locally, and retrying
+  transient Telegram polling failures.
+- Bot never executes shell directly. Covered by the bot boundary tests and
+  preserved by routing all machine actions through daemon typed APIs.
 
 ### Phase 8 — Premium GUI
 

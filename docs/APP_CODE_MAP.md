@@ -149,6 +149,8 @@ This map explains where to work in the Hermes Control Rust workspace.
     `telegram_state` so bot restarts do not replay old updates.
   - `BotEventLog` appends redacted runtime events to `logs/bot/bot.log`, which
     is tailed by daemon `/v1/logs/bot`.
+  - Runtime loop logs and retries Telegram polling failures, and logs
+    message-send failures before continuing.
   - Must remain a thin daemon client.
 
 - `crates/hermes-control-gui`
@@ -182,7 +184,7 @@ This map explains where to work in the Hermes Control Rust workspace.
   request contract, including model logs and route switch.
 - `crates/hermes-control-bot/tests/bot_boundary.rs`: bot allowlist, Teloxide
   command enum parsing, command mapping, offset persistence, redacted bot event
-  logs, and no raw subprocess boundary.
+  logs, runtime config parsing, and no raw subprocess boundary.
 - `crates/hermes-control-daemon/tests/phase3_api.rs`: daemon bearer auth,
   SQLite initialization, read-only API route behavior, and daemon log tailing.
 - `crates/hermes-control-core/tests/phase4_operation_plans.rs`: WSL/Hermes typed

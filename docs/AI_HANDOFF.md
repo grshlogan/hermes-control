@@ -10,9 +10,10 @@ project-owned vLLM provisioning, live qwen36 MTP validation, daemon-backed
 `model logs`, and AWQ fallback start planning. Phase 6 route switching now
 applies Hermes route env patches, persists/refreshes Open WebUI's Hermes-backed
 route config, and exposes explicit last-known-good rollback before updating
-daemon route state. Phase 7 has started by moving the Telegram bot to a
-Teloxide command enum and local SQLite polling-offset persistence while keeping
-it a daemon thin client.
+daemon route state. Phase 7 is complete for the Rust bot code phase: the
+Telegram bot now uses Teloxide command enums, local SQLite polling-offset
+persistence, redacted event logs, and retry/continue behavior while remaining a
+daemon thin client.
 
 ## Phase Report
 
@@ -140,7 +141,7 @@ Phase 6 is complete:
 - `POST /v1/route/rollback`, CLI `route rollback`, and Telegram `/rollback`
   replay the last-known-good profile through the same route apply path.
 
-Phase 7 has started:
+Phase 7 is complete for the Rust bot code phase:
 
 - Phase 7 implementation is aligned to the Teloxide GitHub repository/docs for
   Rust command enums and long polling. The old Python admin controller remains
@@ -152,8 +153,12 @@ Phase 7 has started:
 - The runtime bot loop now long-polls Telegram from the persisted offset and
   writes the next offset before handling each update.
 - Bot runtime events now append to a redacted local log at `logs/bot/bot.log`.
+- Telegram polling and message-send failures are logged and retried/continued
+  so a transient Telegram API failure does not terminate the bot subprocess.
 - Daemon now exposes read-only `/v1/logs/{daemon|bot|hermes}` so bot `/logs`
   has a real no-shell API target for non-model logs.
+- Real Telegram token conversation smoke remains a deployment/runtime check; do
+  not record raw bot tokens in this repository.
 
 ## Current Runtime Observation
 
@@ -186,12 +191,14 @@ Latest pushed commits:
 
 ## Current Phase
 
-Phase 7 has started. Current local unpushed work:
+Phase 7 code closeout is the current local unpushed work. After it is committed,
+the next planned implementation phase is Phase 8 GUI:
 
 - Teloxide `HermesBotCommand` parser and command coverage tests.
 - Local SQLite bot `telegram_state` offset store.
 - Runtime bot long polling now resumes from persisted offset.
 - Redacted bot event log at `logs/bot/bot.log`.
+- Polling retry config through `HERMES_CONTROL_BOT_POLL_ERROR_RETRY_SECONDS`.
 - Read-only daemon log tail endpoint for bot logs commands.
 
 ## Useful Commands

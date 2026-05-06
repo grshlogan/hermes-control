@@ -4,7 +4,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use hermes_control_types::{
@@ -51,6 +51,7 @@ pub struct BotConfig {
     state_db: PathBuf,
     log_dir: PathBuf,
     poll_timeout_seconds: u32,
+    poll_error_retry_seconds: u64,
 }
 
 impl BotConfig {
@@ -114,6 +115,11 @@ impl BotConfig {
             .and_then(|value| value.parse::<u32>().ok())
             .filter(|value| *value > 0)
             .unwrap_or(30);
+        let poll_error_retry_seconds = env
+            .get("HERMES_CONTROL_BOT_POLL_ERROR_RETRY_SECONDS")
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(5);
         let daemon_base_url = env
             .get("HERMES_CONTROL_DAEMON_URL")
             .map(String::as_str)
@@ -130,6 +136,7 @@ impl BotConfig {
             state_db,
             log_dir,
             poll_timeout_seconds,
+            poll_error_retry_seconds,
         })
     }
 
@@ -161,6 +168,10 @@ impl BotConfig {
         self.poll_timeout_seconds
     }
 
+    pub fn poll_error_retry_seconds(&self) -> u64 {
+        self.poll_error_retry_seconds
+    }
+
     fn is_allowed(&self, user_id: &str, chat_id: &str) -> bool {
         let user_allowed = self.allowed_users.contains("*") || self.allowed_users.contains(user_id);
         let chat_allowed = self.allowed_chats.is_empty()
@@ -181,6 +192,7 @@ pub struct BotConfigBuilder {
     state_db: Option<PathBuf>,
     log_dir: Option<PathBuf>,
     poll_timeout_seconds: Option<u32>,
+    poll_error_retry_seconds: Option<u64>,
 }
 
 impl BotConfigBuilder {
@@ -237,6 +249,11 @@ impl BotConfigBuilder {
         self
     }
 
+    pub fn poll_error_retry_seconds(mut self, value: u64) -> Self {
+        self.poll_error_retry_seconds = Some(value);
+        self
+    }
+
     pub fn build(self) -> Result<BotConfig, BotError> {
         Ok(BotConfig {
             telegram_token: self
@@ -257,6 +274,7 @@ impl BotConfigBuilder {
                 .unwrap_or_else(|| PathBuf::from("state/bot.sqlite")),
             log_dir: self.log_dir.unwrap_or_else(|| PathBuf::from("logs/bot")),
             poll_timeout_seconds: self.poll_timeout_seconds.unwrap_or(30),
+            poll_error_retry_seconds: self.poll_error_retry_seconds.unwrap_or(5),
         })
     }
 }
@@ -876,7 +894,7 @@ pub async fn run_bot(config: BotConfig) -> anyhow::Result<()> {
     publish_command_menu(&bot, &event_log).await;
 
     loop {
-        let updates = bot
+        let updates = match bot
             .get_updates()
             .with_payload_mut(|payload| {
                 payload.offset = offset;
@@ -884,15 +902,27 @@ pub async fn run_bot(config: BotConfig) -> anyhow::Result<()> {
                 payload.limit = Some(50);
             })
             .send()
-            .await?;
+            .await
+        {
+            Ok(updates) => updates,
+            Err(err) => {
+                tracing::warn!(error = %err, "Telegram polling failed; retrying");
+                let _ = event_log.append(&format!("telegram polling failed: {err}"));
+                tokio::time::sleep(Duration::from_secs(config.poll_error_retry_seconds())).await;
+                continue;
+            }
+        };
 
         for update in updates {
             let next_offset = update.id.as_offset();
             state.write_next_offset(next_offset)?;
             offset = Some(next_offset);
 
-            if let Some(message) = message_from_update(update) {
-                answer_message(&bot, &daemon, &config, &event_log, message).await?;
+            if let Some(message) = message_from_update(update)
+                && let Err(err) = answer_message(&bot, &daemon, &config, &event_log, message).await
+            {
+                tracing::warn!(error = %err, "Telegram message handling failed; continuing");
+                let _ = event_log.append(&format!("telegram message handling failed: {err}"));
             }
         }
     }

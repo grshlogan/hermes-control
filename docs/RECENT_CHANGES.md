@@ -386,7 +386,7 @@ unimplemented ideas here.
 - Added daemon, CLI, and bot tests covering rollback request shape, dry-run
   preview, state mutation, and missing last-known-good rejection.
 
-## 2026-05-06: Phase 7 Teloxide bot state started
+## 2026-05-06: Phase 7 Teloxide bot code closeout
 
 - Replaced the bot's ad hoc command parsing core with a Teloxide
   `HermesBotCommand` enum while preserving the daemon thin-client boundary.
@@ -397,8 +397,10 @@ unimplemented ideas here.
   the next offset before handling each update.
 - Added `BotEventLog` so the bot writes redacted runtime events to
   `logs/bot/bot.log`.
+- Added polling retry configuration and changed the bot runtime loop to log
+  Telegram polling/message-send failures and continue running.
 - Added daemon `/v1/logs/{target}` for read-only `daemon`, `bot`, and `hermes`
   log tailing so Telegram `/logs` has a real typed API target.
 - Added bot tests for `/start`, command mentions, `/audit` defaulting, Teloxide
-  enum parsing, offset persistence across restarts, redacted event logs, and
-  daemon log tailing.
+  enum parsing, offset persistence across restarts, redacted event logs, runtime
+  config parsing, and daemon log tailing.

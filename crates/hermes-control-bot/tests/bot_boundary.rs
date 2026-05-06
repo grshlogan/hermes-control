@@ -274,3 +274,27 @@ fn bot_event_log_appends_redacted_lines() {
 
     let _ = std::fs::remove_dir_all(&log_dir);
 }
+
+#[test]
+fn bot_config_reads_runtime_paths_and_polling_options_from_env() {
+    let config = BotConfig::from_env_iter([
+        ("TELOXIDE_TOKEN", "telegram-token"),
+        ("HERMES_CONTROL_API_TOKEN", "daemon-token"),
+        ("HERMES_CONTROL_TELEGRAM_ALLOWED_USERS", "123"),
+        ("HERMES_CONTROL_BOT_ID", "phase7"),
+        ("HERMES_CONTROL_BOT_STATE_DB", "state/phase7.sqlite"),
+        ("HERMES_CONTROL_BOT_LOG_DIR", "logs/phase7-bot"),
+        ("HERMES_CONTROL_BOT_POLL_TIMEOUT_SECONDS", "41"),
+        ("HERMES_CONTROL_BOT_POLL_ERROR_RETRY_SECONDS", "7"),
+    ])
+    .expect("env config should parse");
+
+    assert_eq!(config.bot_id(), "phase7");
+    assert_eq!(
+        config.state_db(),
+        std::path::Path::new("state/phase7.sqlite")
+    );
+    assert_eq!(config.log_dir(), std::path::Path::new("logs/phase7-bot"));
+    assert_eq!(config.poll_timeout_seconds(), 41);
+    assert_eq!(config.poll_error_retry_seconds(), 7);
+}

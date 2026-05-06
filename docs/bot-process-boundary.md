@@ -13,6 +13,8 @@ system commands.
 - Stores Telegram polling offset in local SQLite so restarts resume cleanly.
 - Writes a local redacted event log for startup, command-menu publication, and
   daemon request failures.
+- Retries Telegram polling after transient API/network failures instead of
+  exiting the bot process.
 - Sends requests only to the configured local daemon URL.
 - Never calls `powershell`, `wsl.exe`, `.ps1`, shell scripts, or arbitrary
   subprocess APIs.
@@ -37,6 +39,7 @@ $env:HERMES_CONTROL_BOT_STATE_DB = "state/bot.sqlite"
 $env:HERMES_CONTROL_BOT_LOG_DIR = "logs/bot"
 $env:HERMES_CONTROL_BOT_ID = "primary"
 $env:HERMES_CONTROL_BOT_POLL_TIMEOUT_SECONDS = "30"
+$env:HERMES_CONTROL_BOT_POLL_ERROR_RETRY_SECONDS = "5"
 ```
 
 `HERMES_CONTROL_TELEGRAM_TOKEN` can be used instead of `TELOXIDE_TOKEN`.

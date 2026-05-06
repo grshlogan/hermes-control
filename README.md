@@ -2,7 +2,7 @@
 
 Hermes Control 是一个面向 Windows + WSL2 的本地 AI 控制器。它的目标不是再做一个聊天客户端，而是接管本地 Hermes 运行栈的关键控制面：WSL2 生命周期、Hermes 进程、vLLM 本地模型运行时、Open WebUI 接入、路由切换、日志、健康检查和安全确认。
 
-当前项目已完成 Phase 5 基础收尾、Phase 6 route switcher 主闭环，并进入 Phase 7 Teloxide bot 替换：Rust 控制核心、CLI、daemon、bot 边界、WSL root helper、项目内 vLLM 运行时和 qwen36 MTP 实测链路已经建立；route switcher 已能应用 Hermes env patch，同步 Open WebUI 持久配置，在 Open WebUI 已运行时受控刷新进程，并支持显式回滚到 last-known-good route；bot 已迁移到 Teloxide command enum 和本地 SQLite offset 状态；GUI 和完整安装向导还在后续阶段。
+当前项目已完成 Phase 5 基础收尾、Phase 6 route switcher 主闭环和 Phase 7 Teloxide bot 代码收尾：Rust 控制核心、CLI、daemon、bot 边界、WSL root helper、项目内 vLLM 运行时和 qwen36 MTP 实测链路已经建立；route switcher 已能应用 Hermes env patch，同步 Open WebUI 持久配置，在 Open WebUI 已运行时受控刷新进程，并支持显式回滚到 last-known-good route；bot 已迁移到 Teloxide command enum、本地 SQLite offset 状态和脱敏运行日志；GUI 和完整安装向导还在后续阶段。
 
 ## 当前能力
 
@@ -26,7 +26,7 @@ Hermes Control 是一个面向 Windows + WSL2 的本地 AI 控制器。它的目
 - daemon 级 `/v1/logs/<daemon|bot|hermes>` 只读日志 tail API。
 - 固定 WSL root route-apply helper：切换前应用 Hermes env patch、重启并健康检查。
 - 显式 route rollback：CLI、daemon API 和 Telegram bot 边界均可触发 last-known-good 回滚。
-- Telegram bot 使用 Teloxide command enum，保留 allowlist 和 daemon thin-client 边界，并用本地 SQLite 记录 `telegram_state` offset，同时写入脱敏 `logs/bot/bot.log` 事件日志。
+- Telegram bot 使用 Teloxide command enum，保留 allowlist 和 daemon thin-client 边界，并用本地 SQLite 记录 `telegram_state` offset，同时写入脱敏 `logs/bot/bot.log` 事件日志；Telegram 轮询或消息发送短暂失败时会记录并继续运行。
 
 仍在规划或后续阶段：
 
