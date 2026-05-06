@@ -15,15 +15,17 @@ use axum::{
 };
 use hermes_control_core::{
     ConfigError, HermesRuntimeController, ModelRuntimeController, OperationPlan, WslController,
-    collect_read_only_status, load_config_dir,
+    collect_read_only_status, load_config_dir, tail_file_lines,
 };
 use hermes_control_types::{
     ActionRequest, ActiveRouteStatus, AiProviderKind, AuditEventSummary, CancelRequest,
-    CommandPreview, ConfirmRequest, ConfirmationLifecycleResponse, HealthStatus, HermesAction,
-    ModelAction, ModelRuntimeSummary, OperationResponse, ProviderConfig, ReadOnlyStatus, Requester,
-    RequesterChannel, RiskLevel, RouteRollbackRequest, RouteSwitchRequest, WslAction,
+    CommandPreview, ConfirmRequest, ConfirmationLifecycleResponse, ControlConfig, HealthStatus,
+    HermesAction, ModelAction, ModelRuntimeSummary, OperationResponse, ProviderConfig,
+    ReadOnlyStatus, Requester, RequesterChannel, RiskLevel, RouteRollbackRequest,
+    RouteSwitchRequest, WslAction,
 };
 use rusqlite::{Connection, OptionalExtension};
+use serde_json::{Value, json};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -245,6 +247,7 @@ pub fn build_router_with_executor(
         .route("/v1/route/switch", post(route_switch))
         .route("/v1/route/rollback", post(route_rollback))
         .route("/v1/audit", get(audit_events))
+        .route("/v1/logs/{target}", get(log_tail))
         .route("/v1/wsl/status", get(wsl_status))
         .route("/v1/wsl/action", post(wsl_action))
         .route("/v1/hermes/status", get(hermes_status))
@@ -643,6 +646,122 @@ async fn audit_events(
         tracing::warn!(error = %err, "failed to read audit events");
         StatusCode::INTERNAL_SERVER_ERROR
     })
+}
+
+async fn log_tail(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(target): AxumPath<String>,
+    Query(query): Query<HashMap<String, String>>,
+) -> ApiResult<Value> {
+    require_auth(&state, &headers)?;
+    let tail = query
+        .get("tail")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(200)
+        .clamp(1, 1000);
+    let config = load_config_dir(&*state.config_dir).map_err(|err| {
+        tracing::warn!(error = %err, "failed to load config for log tail");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let project_root = project_root_for_config_dir(&state.config_dir);
+    let paths = log_candidate_paths(&project_root, &config.control, &target)
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    read_log_tail(&target, &paths, tail)
+        .map(Json)
+        .map_err(|err| {
+            tracing::warn!(error = %err, target = %target, "failed to tail log");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
+
+fn log_candidate_paths(
+    project_root: &Path,
+    control: &ControlConfig,
+    target: &str,
+) -> Option<Vec<PathBuf>> {
+    match target.to_ascii_lowercase().as_str() {
+        "daemon" => Some(vec![resolve_project_path(
+            project_root,
+            &control.daemon.log_dir,
+        )]),
+        "bot" => Some(vec![project_root.join("logs/bot")]),
+        "hermes" => Some(
+            control
+                .hermes
+                .logs
+                .iter()
+                .map(|path| resolve_project_path(project_root, path))
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
+fn read_log_tail(target: &str, paths: &[PathBuf], tail: usize) -> Result<Value, DaemonError> {
+    let mut candidates = Vec::new();
+    for path in paths {
+        collect_log_candidates(path, &mut candidates)?;
+    }
+
+    let Some(path) = candidates
+        .into_iter()
+        .max_by_key(|candidate| candidate.modified)
+        .map(|candidate| candidate.path)
+    else {
+        return Ok(json!({
+            "target": target,
+            "path": Value::Null,
+            "tail": tail,
+            "lines": [],
+            "detail": "No log file found."
+        }));
+    };
+
+    let lines = tail_file_lines(&path, tail)?;
+    Ok(json!({
+        "target": target,
+        "path": path.display().to_string(),
+        "tail": tail,
+        "lines": lines
+    }))
+}
+
+#[derive(Debug)]
+struct LogCandidate {
+    path: PathBuf,
+    modified: SystemTime,
+}
+
+fn collect_log_candidates(
+    path: &Path,
+    candidates: &mut Vec<LogCandidate>,
+) -> Result<(), DaemonError> {
+    if path.is_file() {
+        candidates.push(LogCandidate {
+            path: path.to_path_buf(),
+            modified: path.metadata()?.modified().unwrap_or(UNIX_EPOCH),
+        });
+        return Ok(());
+    }
+
+    if !path.is_dir() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let metadata = entry.metadata()?;
+        if metadata.is_file() {
+            candidates.push(LogCandidate {
+                path: entry.path(),
+                modified: metadata.modified().unwrap_or(UNIX_EPOCH),
+            });
+        }
+    }
+
+    Ok(())
 }
 
 async fn wsl_status(

@@ -56,7 +56,8 @@ This map explains where to work in the Hermes Control Rust workspace.
 - `crates/hermes-control-daemon`
   - Axum daemon surface.
   - Authenticated read-only routes for status, health, providers, models,
-    individual model status, active route, and audit summaries.
+    individual model status, active route, non-model log tails, and audit
+    summaries.
   - SQLite state/audit initialization for active route, operation state,
     confirmations, and audit events.
   - WSL/Hermes action routes for dry-run previews and destructive-action
@@ -141,9 +142,13 @@ This map explains where to work in the Hermes Control Rust workspace.
 
 - `crates/hermes-control-bot`
   - Windows-hosted Teloxide subprocess.
-  - Environment-based config, allowlist checks, Telegram command parsing, daemon
-    request planning, and daemon response formatting.
+  - Environment-based config, allowlist checks, Teloxide `HermesBotCommand`
+    parsing, daemon request planning, and daemon response formatting.
   - `/model install <model-id>` maps to typed `ModelAction::Install`.
+  - `BotStateStore` persists Telegram long-polling offset in local SQLite
+    `telegram_state` so bot restarts do not replay old updates.
+  - `BotEventLog` appends redacted runtime events to `logs/bot/bot.log`, which
+    is tailed by daemon `/v1/logs/bot`.
   - Must remain a thin daemon client.
 
 - `crates/hermes-control-gui`
@@ -175,10 +180,11 @@ This map explains where to work in the Hermes Control Rust workspace.
   rendering behavior.
 - `crates/hermes-control-cli/tests/daemon_commands.rs`: CLI mutating daemon API
   request contract, including model logs and route switch.
-- `crates/hermes-control-bot/tests/bot_boundary.rs`: bot allowlist, command
-  mapping, and no raw subprocess boundary.
+- `crates/hermes-control-bot/tests/bot_boundary.rs`: bot allowlist, Teloxide
+  command enum parsing, command mapping, offset persistence, redacted bot event
+  logs, and no raw subprocess boundary.
 - `crates/hermes-control-daemon/tests/phase3_api.rs`: daemon bearer auth,
-  SQLite initialization, and read-only API route behavior.
+  SQLite initialization, read-only API route behavior, and daemon log tailing.
 - `crates/hermes-control-core/tests/phase4_operation_plans.rs`: WSL/Hermes typed
   operation planning, fixed WSL command previews, and Hermes script preview
   behavior.

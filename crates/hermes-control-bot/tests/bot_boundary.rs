@@ -1,5 +1,9 @@
-use hermes_control_bot::{BotConfig, BotDecision, HttpMethod, plan_message};
+use hermes_control_bot::{
+    BotConfig, BotDecision, BotEventLog, BotStateStore, HermesBotCommand, HttpMethod, plan_message,
+    telegram_command_menu,
+};
 use serde_json::json;
+use teloxide::utils::command::BotCommands;
 
 fn test_config() -> BotConfig {
     BotConfig::builder_for_tests()
@@ -31,6 +35,60 @@ fn status_is_a_read_only_daemon_status_call() {
         BotDecision::Daemon {
             method: HttpMethod::Get,
             path: "/v1/status".to_owned(),
+            body: None,
+        }
+    );
+}
+
+#[test]
+fn start_alias_returns_help_without_daemon_call() {
+    let decision = plan_message("/start", "123", "chat-a", &test_config()).unwrap();
+
+    let BotDecision::Reply(reply) = decision else {
+        panic!("/start should render local help");
+    };
+    assert!(reply.contains("/status"));
+    assert!(reply.contains("/confirm <code>"));
+}
+
+#[test]
+fn telegram_mention_is_accepted_for_commands() {
+    let decision = plan_message(
+        "/switch@HermesControlBot local.vllm",
+        "123",
+        "chat-a",
+        &test_config(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        decision,
+        BotDecision::Daemon {
+            method: HttpMethod::Post,
+            path: "/v1/route/switch".to_owned(),
+            body: Some(json!({
+                "requester": {
+                    "channel": "telegram",
+                    "user_id": "123",
+                    "chat_id": "chat-a"
+                },
+                "reason": "telegram /switch local.vllm",
+                "profile_id": "local.vllm",
+                "dry_run": false
+            })),
+        }
+    );
+}
+
+#[test]
+fn audit_without_limit_uses_default_limit() {
+    let decision = plan_message("/audit", "123", "chat-a", &test_config()).unwrap();
+
+    assert_eq!(
+        decision,
+        BotDecision::Daemon {
+            method: HttpMethod::Get,
+            path: "/v1/audit?limit=100".to_owned(),
             body: None,
         }
     );
@@ -148,4 +206,71 @@ fn confirm_forwards_code_to_daemon_confirmation_endpoint() {
             })),
         }
     );
+}
+
+#[test]
+fn teloxide_command_enum_parses_model_command_arguments() {
+    let command = HermesBotCommand::parse("/model start qwen36-mtp", "")
+        .expect("teloxide command enum should parse model args");
+
+    assert_eq!(
+        command,
+        HermesBotCommand::Model("start qwen36-mtp".to_owned())
+    );
+}
+
+#[test]
+fn bot_state_store_persists_next_offset_across_restarts() {
+    let db_path = std::env::temp_dir().join(format!(
+        "hermes-control-bot-state-{}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&db_path);
+
+    let store =
+        BotStateStore::initialize(&db_path, "primary").expect("state store should initialize");
+    assert_eq!(store.read_next_offset().unwrap(), None);
+
+    store.write_next_offset(7422).unwrap();
+
+    let reopened =
+        BotStateStore::initialize(&db_path, "primary").expect("state store should reopen");
+    assert_eq!(reopened.read_next_offset().unwrap(), Some(7422));
+
+    let _ = std::fs::remove_file(&db_path);
+}
+
+#[test]
+fn telegram_command_menu_is_derived_from_teloxide_command_enum() {
+    let commands = telegram_command_menu();
+    let names = commands
+        .iter()
+        .map(|command| command.command.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(names.contains(&"status"));
+    assert!(names.contains(&"rollback"));
+    assert!(names.contains(&"confirm"));
+    assert!(names.contains(&"logs"));
+    assert!(!names.contains(&"start"));
+}
+
+#[test]
+fn bot_event_log_appends_redacted_lines() {
+    let log_dir =
+        std::env::temp_dir().join(format!("hermes-control-bot-logs-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&log_dir);
+
+    let log = BotEventLog::initialize(&log_dir).expect("log should initialize");
+    log.append("bot started with TELOXIDE_TOKEN=secret and Bearer abc")
+        .expect("log should append");
+
+    let content = std::fs::read_to_string(log_dir.join("bot.log")).expect("log should read");
+    assert!(content.contains("bot started"));
+    assert!(content.contains("TELOXIDE_TOKEN=<redacted>"));
+    assert!(content.contains("Bearer <redacted>"));
+    assert!(!content.contains("secret"));
+    assert!(!content.contains("Bearer abc"));
+
+    let _ = std::fs::remove_dir_all(&log_dir);
 }

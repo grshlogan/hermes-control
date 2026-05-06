@@ -7,9 +7,12 @@ system commands.
 ## Authority Boundary
 
 - Runs on Windows, outside WSL.
-- Receives Telegram messages through Teloxide.
+- Receives Telegram messages through Teloxide long polling.
 - Checks Telegram user and optional chat allowlists before any daemon call.
-- Converts commands into typed daemon API requests.
+- Converts a Teloxide `HermesBotCommand` enum into typed daemon API requests.
+- Stores Telegram polling offset in local SQLite so restarts resume cleanly.
+- Writes a local redacted event log for startup, command-menu publication, and
+  daemon request failures.
 - Sends requests only to the configured local daemon URL.
 - Never calls `powershell`, `wsl.exe`, `.ps1`, shell scripts, or arbitrary
   subprocess APIs.
@@ -30,10 +33,38 @@ Optional:
 ```powershell
 $env:HERMES_CONTROL_DAEMON_URL = "http://127.0.0.1:18787"
 $env:HERMES_CONTROL_TELEGRAM_ALLOWED_CHATS = "<telegram chat id>[,<telegram chat id>]"
+$env:HERMES_CONTROL_BOT_STATE_DB = "state/bot.sqlite"
+$env:HERMES_CONTROL_BOT_LOG_DIR = "logs/bot"
+$env:HERMES_CONTROL_BOT_ID = "primary"
+$env:HERMES_CONTROL_BOT_POLL_TIMEOUT_SECONDS = "30"
 ```
 
 `HERMES_CONTROL_TELEGRAM_TOKEN` can be used instead of `TELOXIDE_TOKEN`.
 `HERMES_ADMIN_ALLOWED_USERS` is accepted as a temporary migration alias.
+
+## Local State
+
+The bot owns only Telegram polling state. The default SQLite DB is:
+
+```text
+E:\WSL\Hermres\hermes-control\state\bot.sqlite
+```
+
+It contains `telegram_state(bot_id, update_offset, updated_at)`. Machine-control
+state, confirmations, audit rows, Hermes, WSL, vLLM, and route state still live
+behind `hermes-control-daemon`.
+
+## Local Logs
+
+The default redacted bot event log is:
+
+```text
+E:\WSL\Hermres\hermes-control\logs\bot\bot.log
+```
+
+This log is the local source for daemon `/v1/logs/bot` tailing. It must not
+contain Telegram tokens, daemon bearer tokens, raw authorization headers, or API
+keys.
 
 ## Development Startup
 

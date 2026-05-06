@@ -64,6 +64,20 @@ async fn phase3_router_serves_read_only_config_state_and_model_routes() {
     assert_eq!(models[0]["ready"], false);
 }
 
+#[tokio::test]
+async fn phase3_router_tails_daemon_logs_without_shell_execution() {
+    let fixture = Fixture::new();
+    let log_dir = fixture.root.join("logs/daemon");
+    fs::create_dir_all(&log_dir).expect("log dir should create");
+    fs::write(log_dir.join("daemon.log"), "one\ntwo\nthree\n").expect("log should write");
+
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+    let logs = get_json(router, "/v1/logs/daemon?tail=2").await;
+
+    assert_eq!(logs["target"], "daemon");
+    assert_eq!(logs["lines"], serde_json::json!(["two", "three"]));
+}
+
 async fn get(router: Router, path: &str, token: Option<&str>) -> axum::response::Response {
     let mut request = Request::builder().uri(path);
     if let Some(token) = token {
@@ -99,6 +113,7 @@ fn table_names(path: &Path) -> Vec<String> {
 
 struct Fixture {
     _temp: TempDir,
+    root: PathBuf,
     config_dir: PathBuf,
     state_db: PathBuf,
     audit_db: PathBuf,
@@ -190,6 +205,7 @@ profiles = ["vllm.qwen36-mtp"]
 
         Self {
             _temp: temp,
+            root: root.clone(),
             config_dir,
             state_db: root.join("state/state.sqlite"),
             audit_db: root.join("state/audit.sqlite"),

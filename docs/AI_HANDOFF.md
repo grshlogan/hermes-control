@@ -10,7 +10,9 @@ project-owned vLLM provisioning, live qwen36 MTP validation, daemon-backed
 `model logs`, and AWQ fallback start planning. Phase 6 route switching now
 applies Hermes route env patches, persists/refreshes Open WebUI's Hermes-backed
 route config, and exposes explicit last-known-good rollback before updating
-daemon route state.
+daemon route state. Phase 7 has started by moving the Telegram bot to a
+Teloxide command enum and local SQLite polling-offset persistence while keeping
+it a daemon thin client.
 
 ## Phase Report
 
@@ -108,7 +110,7 @@ Phase 5 basic closeout is complete:
 - Live qwen36 MTP, Hermes gateway, and Open WebUI calls were verified on
   2026-05-03.
 
-Phase 6 has started:
+Phase 6 is complete:
 
 - `POST /v1/route/switch` validates provider profile IDs, supports dry-run,
   persists active route state, records last-known-good route, and writes audit
@@ -138,6 +140,21 @@ Phase 6 has started:
 - `POST /v1/route/rollback`, CLI `route rollback`, and Telegram `/rollback`
   replay the last-known-good profile through the same route apply path.
 
+Phase 7 has started:
+
+- Phase 7 implementation is aligned to the Teloxide GitHub repository/docs for
+  Rust command enums and long polling. The old Python admin controller remains
+  read-only legacy context only.
+- `hermes-control-bot` now exposes a `HermesBotCommand` Teloxide command enum
+  for command parsing, including Telegram bot mentions and `/start`.
+- Bot offset is stored in a local SQLite `telegram_state` table keyed by
+  `bot_id`; default path is `state/bot.sqlite`.
+- The runtime bot loop now long-polls Telegram from the persisted offset and
+  writes the next offset before handling each update.
+- Bot runtime events now append to a redacted local log at `logs/bot/bot.log`.
+- Daemon now exposes read-only `/v1/logs/{daemon|bot|hermes}` so bot `/logs`
+  has a real no-shell API target for non-model logs.
+
 ## Current Runtime Observation
 
 The last real runtime smoke observed on May 3, 2026:
@@ -161,30 +178,21 @@ runtime claims.
 
 Latest pushed commits:
 
+- `af17675 feat: complete Phase 6 route rollback`
+- `a4fec94 feat: sync Open WebUI route through Hermes`
+- `98f462d feat: apply Hermes route before switching state`
+- `7a28549 feat: close Phase 5 and start Phase 6 route switching`
 - `48d1b37 feat: add Phase 5 vLLM provisioning flow`
-- `99dac2a feat: start Phase 5 vLLM runtime actions`
-- `869971c feat: close out Phase 4 daemon CLI actions`
-- `90a5a99 feat: add WSL root helper integration`
-- `c95855c feat: add Hermes fixed-script execution boundary`
 
 ## Current Phase
 
-Phase 6 has started. Current local unpushed work:
+Phase 7 has started. Current local unpushed work:
 
-- `OperationResponse.output` and daemon stdout capture for log-style helpers.
-- CLI `model logs <model-id>` daemon action support.
-- WSL root `hermes-control-vllm-start-with-fallback.sh`.
-- MTP start/restart plan fallback to stable AWQ variant.
-- Daemon route switch endpoint and CLI route switch command.
-- Route state stores active and last-known-good profile IDs.
-- Local vLLM route readiness gate.
-- Fixed Hermes route apply helper and executor allowlist support.
-- Provider secret env-key routing for external route profiles.
-- Open WebUI persistent config sync helper.
-- Open WebUI if-running refresh helper.
-- Open WebUI refresh-failure restore path for DB, Hermes env, and previous UI
-  process startup.
-- Explicit route rollback API/CLI/bot command.
+- Teloxide `HermesBotCommand` parser and command coverage tests.
+- Local SQLite bot `telegram_state` offset store.
+- Runtime bot long polling now resumes from persisted offset.
+- Redacted bot event log at `logs/bot/bot.log`.
+- Read-only daemon log tail endpoint for bot logs commands.
 
 ## Useful Commands
 

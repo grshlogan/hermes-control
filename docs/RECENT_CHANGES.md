@@ -385,3 +385,20 @@ unimplemented ideas here.
   boundaries.
 - Added daemon, CLI, and bot tests covering rollback request shape, dry-run
   preview, state mutation, and missing last-known-good rejection.
+
+## 2026-05-06: Phase 7 Teloxide bot state started
+
+- Replaced the bot's ad hoc command parsing core with a Teloxide
+  `HermesBotCommand` enum while preserving the daemon thin-client boundary.
+- Added local SQLite `BotStateStore` for Telegram polling offset persistence,
+  aligned with Teloxide long-polling offset behavior and without importing
+  legacy code.
+- Changed the runtime bot loop to long-poll from the persisted offset and record
+  the next offset before handling each update.
+- Added `BotEventLog` so the bot writes redacted runtime events to
+  `logs/bot/bot.log`.
+- Added daemon `/v1/logs/{target}` for read-only `daemon`, `bot`, and `hermes`
+  log tailing so Telegram `/logs` has a real typed API target.
+- Added bot tests for `/start`, command mentions, `/audit` defaulting, Teloxide
+  enum parsing, offset persistence across restarts, redacted event logs, and
+  daemon log tailing.

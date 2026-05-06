@@ -750,6 +750,7 @@ Commands:
 /providers
 /route
 /switch <profile-id>
+/rollback
 /models
 /model <status|install|start|stop|restart|logs|benchmark> <model-id>
 /hermes <wake|stop|restart|kill>
@@ -768,6 +769,11 @@ Handler rules:
 - For confirmation: daemon creates code; bot only relays.
 - Bot state persistence should survive bot restart.
 - Bot process must run on Windows, not inside WSL, so WSL restart does not silence remote control.
+- Current Phase 7 increment uses a Rust `HermesBotCommand` Teloxide enum for
+  command parsing and stores polling offset in a local SQLite `telegram_state`
+  table. The implementation follows the Teloxide GitHub repository and docs for
+  Rust bot command enums and long polling; legacy Python remains reference-only
+  and is not an implementation source.
 
 ---
 
@@ -1171,12 +1177,20 @@ Goal:
 
 Codex tasks:
 
-- Use teloxide command enum.
-- Implement allowlist.
-- Implement daemon client.
-- Implement confirmation flow.
-- Implement logs/status/model/route commands.
-- Store offset/dialogue state robustly.
+- Use teloxide command enum. Done for this increment through
+  `HermesBotCommand`.
+- Implement allowlist. Done for user ID and optional chat ID.
+- Implement daemon client. Done; bot sends typed daemon API requests only.
+- Implement confirmation flow. Done as a daemon confirmation relay.
+- Implement logs/status/model/route commands. Mostly done for the planned
+  command surface, including `/rollback`; non-model `/logs` now has a daemon
+  read-only `/v1/logs/{target}` endpoint.
+- Store offset/dialogue state robustly. Offset persistence is now local SQLite;
+  richer dialogue state can be added only if future bot UX needs multi-step
+  conversations.
+- Write redacted bot runtime logs. Done for startup, command-menu publication,
+  daemon request planning/failure, and invalid-command events through
+  `logs/bot/bot.log`.
 
 Completion signal:
 

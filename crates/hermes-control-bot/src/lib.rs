@@ -1,13 +1,22 @@
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use hermes_control_types::{
     ActionRequest, CancelRequest, ConfirmRequest, HermesAction, ModelAction, Requester,
     RouteRollbackRequest, RouteSwitchRequest, WslAction,
 };
+use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
 use teloxide::prelude::*;
-use teloxide::requests::Requester as TeloxideRequester;
+use teloxide::requests::{HasPayload, Request, Requester as TeloxideRequester};
+use teloxide::types::{BotCommand, Message, Update, UpdateKind};
+use teloxide::utils::command::BotCommands;
 use thiserror::Error;
 use url::Url;
 
@@ -25,6 +34,10 @@ pub enum BotError {
     Serialize(#[from] serde_json::Error),
     #[error("daemon request failed: {0}")]
     Http(#[from] reqwest::Error),
+    #[error("bot state I/O error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("bot state SQLite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
 }
 
 #[derive(Debug, Clone)]
@@ -34,6 +47,10 @@ pub struct BotConfig {
     daemon_api_token: String,
     allowed_users: BTreeSet<String>,
     allowed_chats: BTreeSet<String>,
+    bot_id: String,
+    state_db: PathBuf,
+    log_dir: PathBuf,
+    poll_timeout_seconds: u32,
 }
 
 impl BotConfig {
@@ -79,6 +96,24 @@ impl BotConfig {
             .get("HERMES_CONTROL_TELEGRAM_ALLOWED_CHATS")
             .map(|value| parse_csv_set(value))
             .unwrap_or_default();
+        let bot_id = env
+            .get("HERMES_CONTROL_BOT_ID")
+            .cloned()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "primary".to_owned());
+        let state_db = env
+            .get("HERMES_CONTROL_BOT_STATE_DB")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("state/bot.sqlite"));
+        let log_dir = env
+            .get("HERMES_CONTROL_BOT_LOG_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("logs/bot"));
+        let poll_timeout_seconds = env
+            .get("HERMES_CONTROL_BOT_POLL_TIMEOUT_SECONDS")
+            .and_then(|value| value.parse::<u32>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(30);
         let daemon_base_url = env
             .get("HERMES_CONTROL_DAEMON_URL")
             .map(String::as_str)
@@ -91,6 +126,10 @@ impl BotConfig {
             daemon_api_token,
             allowed_users,
             allowed_chats,
+            bot_id,
+            state_db,
+            log_dir,
+            poll_timeout_seconds,
         })
     }
 
@@ -104,6 +143,22 @@ impl BotConfig {
 
     pub fn daemon_api_token(&self) -> &str {
         &self.daemon_api_token
+    }
+
+    pub fn bot_id(&self) -> &str {
+        &self.bot_id
+    }
+
+    pub fn state_db(&self) -> &Path {
+        &self.state_db
+    }
+
+    pub fn log_dir(&self) -> &Path {
+        &self.log_dir
+    }
+
+    pub fn poll_timeout_seconds(&self) -> u32 {
+        self.poll_timeout_seconds
     }
 
     fn is_allowed(&self, user_id: &str, chat_id: &str) -> bool {
@@ -122,6 +177,10 @@ pub struct BotConfigBuilder {
     daemon_api_token: Option<String>,
     allowed_users: BTreeSet<String>,
     allowed_chats: BTreeSet<String>,
+    bot_id: Option<String>,
+    state_db: Option<PathBuf>,
+    log_dir: Option<PathBuf>,
+    poll_timeout_seconds: Option<u32>,
 }
 
 impl BotConfigBuilder {
@@ -158,6 +217,26 @@ impl BotConfigBuilder {
         self
     }
 
+    pub fn bot_id(mut self, value: impl Into<String>) -> Self {
+        self.bot_id = Some(value.into());
+        self
+    }
+
+    pub fn state_db(mut self, value: impl Into<PathBuf>) -> Self {
+        self.state_db = Some(value.into());
+        self
+    }
+
+    pub fn log_dir(mut self, value: impl Into<PathBuf>) -> Self {
+        self.log_dir = Some(value.into());
+        self
+    }
+
+    pub fn poll_timeout_seconds(mut self, value: u32) -> Self {
+        self.poll_timeout_seconds = Some(value);
+        self
+    }
+
     pub fn build(self) -> Result<BotConfig, BotError> {
         Ok(BotConfig {
             telegram_token: self
@@ -172,7 +251,153 @@ impl BotConfigBuilder {
                 .ok_or(BotError::MissingEnv("HERMES_CONTROL_API_TOKEN"))?,
             allowed_users: self.allowed_users,
             allowed_chats: self.allowed_chats,
+            bot_id: self.bot_id.unwrap_or_else(|| "primary".to_owned()),
+            state_db: self
+                .state_db
+                .unwrap_or_else(|| PathBuf::from("state/bot.sqlite")),
+            log_dir: self.log_dir.unwrap_or_else(|| PathBuf::from("logs/bot")),
+            poll_timeout_seconds: self.poll_timeout_seconds.unwrap_or(30),
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, BotCommands)]
+#[command(rename_rule = "lowercase")]
+pub enum HermesBotCommand {
+    /// Show command help.
+    #[command(aliases = ["start"])]
+    Help,
+    /// Show full local-stack status.
+    Status,
+    /// Show daemon health.
+    Health,
+    /// List provider profiles.
+    Providers,
+    /// Show active AI route.
+    Route,
+    /// Switch active AI route.
+    Switch(String),
+    /// Roll back to last-known-good route.
+    Rollback,
+    /// List model runtimes.
+    Models,
+    /// Run a model command.
+    Model(String),
+    /// Run a Hermes command.
+    Hermes(String),
+    /// Run a WSL command.
+    Wsl(String),
+    /// Tail logs.
+    Logs(String),
+    /// Show audit events.
+    Audit(String),
+    /// Confirm a pending operation.
+    Confirm(String),
+    /// Cancel a pending operation.
+    Cancel,
+}
+
+pub fn telegram_command_menu() -> Vec<BotCommand> {
+    HermesBotCommand::bot_commands()
+        .into_iter()
+        .map(|mut command| {
+            command.command = command.command.trim_start_matches('/').to_owned();
+            command
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+pub struct BotStateStore {
+    state_db: Arc<PathBuf>,
+    bot_id: Arc<str>,
+}
+
+impl BotStateStore {
+    pub fn initialize(
+        state_db: impl AsRef<Path>,
+        bot_id: impl Into<String>,
+    ) -> Result<Self, BotError> {
+        let state_db = state_db.as_ref().to_path_buf();
+        if let Some(parent) = state_db
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent)?;
+        }
+
+        let connection = Connection::open(&state_db)?;
+        connection.execute_batch(
+            "
+            PRAGMA journal_mode = WAL;
+            CREATE TABLE IF NOT EXISTS telegram_state (
+                bot_id TEXT PRIMARY KEY,
+                update_offset INTEGER NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            ",
+        )?;
+
+        Ok(Self {
+            state_db: Arc::new(state_db),
+            bot_id: Arc::from(bot_id.into()),
+        })
+    }
+
+    pub fn read_next_offset(&self) -> Result<Option<i32>, BotError> {
+        let connection = Connection::open(&*self.state_db)?;
+        let offset = connection
+            .query_row(
+                "SELECT update_offset FROM telegram_state WHERE bot_id = ?1",
+                [&*self.bot_id],
+                |row| row.get::<_, i32>(0),
+            )
+            .optional()?;
+        Ok(offset)
+    }
+
+    pub fn write_next_offset(&self, offset: i32) -> Result<(), BotError> {
+        let connection = Connection::open(&*self.state_db)?;
+        connection.execute(
+            "
+            INSERT INTO telegram_state (bot_id, update_offset, updated_at)
+            VALUES (?1, ?2, CURRENT_TIMESTAMP)
+            ON CONFLICT(bot_id) DO UPDATE SET
+                update_offset = excluded.update_offset,
+                updated_at = CURRENT_TIMESTAMP
+            ",
+            (&*self.bot_id, offset),
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BotEventLog {
+    log_file: Arc<PathBuf>,
+}
+
+impl BotEventLog {
+    pub fn initialize(log_dir: impl AsRef<Path>) -> Result<Self, BotError> {
+        let log_dir = log_dir.as_ref();
+        fs::create_dir_all(log_dir)?;
+        Ok(Self {
+            log_file: Arc::new(log_dir.join("bot.log")),
+        })
+    }
+
+    pub fn append(&self, message: &str) -> Result<(), BotError> {
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&*self.log_file)?;
+        writeln!(
+            file,
+            "{} {}",
+            unix_epoch_seconds(),
+            redact_log_line(message)
+        )?;
+        Ok(())
     }
 }
 
@@ -190,6 +415,15 @@ pub enum BotDecision {
         path: String,
         body: Option<Value>,
     },
+}
+
+impl BotDecision {
+    fn path(&self) -> &str {
+        match self {
+            Self::Reply(_) => "",
+            Self::Daemon { path, .. } => path,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -395,63 +629,90 @@ fn parse_command(text: &str) -> Result<AdminCommand, BotError> {
         return Ok(AdminCommand::Help);
     }
 
-    let parts = trimmed.split_whitespace().collect::<Vec<_>>();
-    let command = parts[0]
-        .trim_start_matches('/')
+    let normalized = normalize_command_text(trimmed);
+    let command = HermesBotCommand::parse(&normalized, "")
+        .map_err(|err| BotError::InvalidCommand(err.to_string()))?;
+    admin_command_from_bot_command(command)
+}
+
+fn admin_command_from_bot_command(command: HermesBotCommand) -> Result<AdminCommand, BotError> {
+    match command {
+        HermesBotCommand::Help => Ok(AdminCommand::Help),
+        HermesBotCommand::Status => Ok(AdminCommand::Status),
+        HermesBotCommand::Health => Ok(AdminCommand::Health),
+        HermesBotCommand::Providers => Ok(AdminCommand::Providers),
+        HermesBotCommand::Route => Ok(AdminCommand::Route),
+        HermesBotCommand::Switch(args) => Ok(AdminCommand::Switch {
+            profile_id: single_arg(&args, "/switch <profile-id>")?.to_owned(),
+        }),
+        HermesBotCommand::Rollback => Ok(AdminCommand::Rollback),
+        HermesBotCommand::Models => Ok(AdminCommand::Models),
+        HermesBotCommand::Model(args) => {
+            let parts = split_args(&args);
+            Ok(AdminCommand::Model {
+                action: required_arg(
+                    &parts,
+                    0,
+                    "/model <status|install|start|stop|restart|logs|benchmark> <model-id>",
+                )?
+                .to_owned(),
+                model_id: required_arg(
+                    &parts,
+                    1,
+                    "/model <status|install|start|stop|restart|logs|benchmark> <model-id>",
+                )?
+                .to_owned(),
+            })
+        }
+        HermesBotCommand::Hermes(args) => Ok(AdminCommand::Hermes {
+            action: single_arg(&args, "/hermes <wake|stop|restart|kill|status>")?.to_owned(),
+        }),
+        HermesBotCommand::Wsl(args) => Ok(AdminCommand::Wsl {
+            action: single_arg(&args, "/wsl <status|wake|stop|restart>")?.to_owned(),
+        }),
+        HermesBotCommand::Logs(args) => {
+            let parts = split_args(&args);
+            Ok(AdminCommand::Logs {
+                target: required_arg(&parts, 0, "/logs <hermes|daemon|bot|model> [id]")?.to_owned(),
+                id: parts.get(1).map(|value| (*value).to_owned()),
+            })
+        }
+        HermesBotCommand::Audit(args) => Ok(AdminCommand::Audit {
+            limit: args.trim().parse::<usize>().unwrap_or(100),
+        }),
+        HermesBotCommand::Confirm(code) => Ok(AdminCommand::Confirm {
+            code: single_arg(&code, "/confirm <code>")?.to_owned(),
+        }),
+        HermesBotCommand::Cancel => Ok(AdminCommand::Cancel),
+    }
+}
+
+fn normalize_command_text(text: &str) -> String {
+    let mut parts = text.splitn(2, char::is_whitespace);
+    let command = parts.next().unwrap_or_default();
+    let args = parts.next();
+    let command = command
         .split('@')
         .next()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+        .filter(|value| !value.is_empty())
+        .unwrap_or(command);
 
-    match command.as_str() {
-        "help" | "start" => Ok(AdminCommand::Help),
-        "status" => Ok(AdminCommand::Status),
-        "health" => Ok(AdminCommand::Health),
-        "providers" => Ok(AdminCommand::Providers),
-        "route" => Ok(AdminCommand::Route),
-        "switch" => Ok(AdminCommand::Switch {
-            profile_id: required_arg(&parts, 1, "/switch <profile-id>")?.to_owned(),
-        }),
-        "rollback" => Ok(AdminCommand::Rollback),
-        "models" => Ok(AdminCommand::Models),
-        "model" => Ok(AdminCommand::Model {
-            action: required_arg(
-                &parts,
-                1,
-                "/model <status|install|start|stop|restart|logs|benchmark> <model-id>",
-            )?
-            .to_owned(),
-            model_id: required_arg(
-                &parts,
-                2,
-                "/model <status|install|start|stop|restart|logs|benchmark> <model-id>",
-            )?
-            .to_owned(),
-        }),
-        "hermes" => Ok(AdminCommand::Hermes {
-            action: required_arg(&parts, 1, "/hermes <wake|stop|restart|kill|status>")?.to_owned(),
-        }),
-        "wsl" => Ok(AdminCommand::Wsl {
-            action: required_arg(&parts, 1, "/wsl <status|wake|stop|restart>")?.to_owned(),
-        }),
-        "logs" => Ok(AdminCommand::Logs {
-            target: required_arg(&parts, 1, "/logs <hermes|daemon|bot|model> [id]")?.to_owned(),
-            id: parts.get(2).map(|value| (*value).to_owned()),
-        }),
-        "audit" => Ok(AdminCommand::Audit {
-            limit: parts
-                .get(1)
-                .and_then(|value| value.parse::<usize>().ok())
-                .unwrap_or(100),
-        }),
-        "confirm" => Ok(AdminCommand::Confirm {
-            code: required_arg(&parts, 1, "/confirm <code>")?.to_owned(),
-        }),
-        "cancel" => Ok(AdminCommand::Cancel),
-        other => Err(BotError::InvalidCommand(format!(
-            "unknown command /{other}"
-        ))),
+    match (command.eq_ignore_ascii_case("/audit"), args) {
+        (true, None) => "/audit 100".to_owned(),
+        _ => args.map_or_else(|| command.to_owned(), |args| format!("{command} {args}")),
     }
+}
+
+fn split_args(value: &str) -> Vec<&str> {
+    value.split_whitespace().collect()
+}
+
+fn single_arg<'a>(value: &'a str, usage: &str) -> Result<&'a str, BotError> {
+    value
+        .split_whitespace()
+        .next()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| BotError::InvalidCommand(format!("usage: {usage}")))
 }
 
 fn required_arg<'a>(parts: &'a [&str], index: usize, usage: &str) -> Result<&'a str, BotError> {
@@ -469,6 +730,50 @@ fn parse_csv_set(value: &str) -> BTreeSet<String> {
         .filter(|item| !item.is_empty())
         .map(ToOwned::to_owned)
         .collect()
+}
+
+fn unix_epoch_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default()
+}
+
+fn redact_log_line(value: &str) -> String {
+    let tokens = value.split_whitespace().collect::<Vec<_>>();
+    let mut redacted = Vec::with_capacity(tokens.len());
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = tokens[index];
+        if token.eq_ignore_ascii_case("Bearer") {
+            redacted.push("Bearer".to_owned());
+            if index + 1 < tokens.len() {
+                redacted.push("<redacted>".to_owned());
+                index += 2;
+                continue;
+            }
+        } else {
+            redacted.push(redact_log_token(token));
+        }
+        index += 1;
+    }
+    redacted.join(" ")
+}
+
+fn redact_log_token(token: &str) -> String {
+    let upper = token.to_ascii_uppercase();
+    if upper.starts_with("TELOXIDE_TOKEN=")
+        || upper.starts_with("HERMES_CONTROL_TELEGRAM_TOKEN=")
+        || upper.starts_with("HERMES_CONTROL_API_TOKEN=")
+        || upper.starts_with("AUTHORIZATION=")
+    {
+        return token
+            .split_once('=')
+            .map(|(key, _)| format!("{key}=<redacted>"))
+            .unwrap_or_else(|| "<redacted>".to_owned());
+    }
+
+    token.to_owned()
 }
 
 fn help_text() -> String {
@@ -556,35 +861,93 @@ fn format_daemon_response(value: &Value) -> String {
 
 pub async fn run_bot(config: BotConfig) -> anyhow::Result<()> {
     let bot = Bot::new(config.telegram_token.clone());
-    let config = Arc::new(config);
-    let daemon = Arc::new(DaemonClient::from_config(&config));
+    let state = BotStateStore::initialize(config.state_db(), config.bot_id())?;
+    let event_log = BotEventLog::initialize(config.log_dir())?;
+    let daemon = DaemonClient::from_config(&config);
+    let mut offset = state.read_next_offset()?;
+    event_log.append(&format!(
+        "bot started bot_id={} state_db={} offset={}",
+        config.bot_id(),
+        config.state_db().display(),
+        offset
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_owned())
+    ))?;
+    publish_command_menu(&bot, &event_log).await;
 
-    teloxide::repl(bot, move |bot: Bot, msg: Message| {
-        let config = Arc::clone(&config);
-        let daemon = Arc::clone(&daemon);
-        async move {
-            if let Some(text) = msg.text() {
-                let user_id = msg
-                    .from
-                    .as_ref()
-                    .map(|user| user.id.0.to_string())
-                    .unwrap_or_else(|| "unknown".to_owned());
-                let chat_id = msg.chat.id.to_string();
-                let reply = match plan_message(text, &user_id, &chat_id, &config) {
-                    Ok(BotDecision::Reply(reply)) => reply,
-                    Ok(decision @ BotDecision::Daemon { .. }) => daemon
-                        .send(&decision)
-                        .await
-                        .unwrap_or_else(|err| format!("Daemon request failed: {err}")),
-                    Err(err) => err.to_string(),
-                };
+    loop {
+        let updates = bot
+            .get_updates()
+            .with_payload_mut(|payload| {
+                payload.offset = offset;
+                payload.timeout = Some(config.poll_timeout_seconds());
+                payload.limit = Some(50);
+            })
+            .send()
+            .await?;
 
-                bot.send_message(msg.chat.id, reply).await?;
+        for update in updates {
+            let next_offset = update.id.as_offset();
+            state.write_next_offset(next_offset)?;
+            offset = Some(next_offset);
+
+            if let Some(message) = message_from_update(update) {
+                answer_message(&bot, &daemon, &config, &event_log, message).await?;
             }
-            Ok(())
         }
-    })
-    .await;
+    }
+}
 
+async fn publish_command_menu(bot: &Bot, event_log: &BotEventLog) {
+    match bot.set_my_commands(telegram_command_menu()).send().await {
+        Ok(_) => {
+            let _ = event_log.append("telegram command menu published");
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to publish Telegram command menu");
+            let _ = event_log.append(&format!("telegram command menu publish failed: {err}"));
+        }
+    }
+}
+
+fn message_from_update(update: Update) -> Option<Message> {
+    match update.kind {
+        UpdateKind::Message(message) | UpdateKind::EditedMessage(message) => Some(message),
+        _ => None,
+    }
+}
+
+async fn answer_message(
+    bot: &Bot,
+    daemon: &DaemonClient,
+    config: &BotConfig,
+    event_log: &BotEventLog,
+    msg: Message,
+) -> ResponseResult<()> {
+    if let Some(text) = msg.text() {
+        let user_id = msg
+            .from
+            .as_ref()
+            .map(|user| user.id.0.to_string())
+            .unwrap_or_else(|| "unknown".to_owned());
+        let chat_id = msg.chat.id.to_string();
+        let reply = match plan_message(text, &user_id, &chat_id, config) {
+            Ok(BotDecision::Reply(reply)) => reply,
+            Ok(decision @ BotDecision::Daemon { .. }) => {
+                let _ =
+                    event_log.append(&format!("daemon request planned path={}", decision.path()));
+                daemon.send(&decision).await.unwrap_or_else(|err| {
+                    let _ = event_log.append(&format!("daemon request failed: {err}"));
+                    format!("Daemon request failed: {err}")
+                })
+            }
+            Err(err) => {
+                let _ = event_log.append(&format!("invalid bot command: {err}"));
+                err.to_string()
+            }
+        };
+
+        bot.send_message(msg.chat.id, reply).await?;
+    }
     Ok(())
 }
