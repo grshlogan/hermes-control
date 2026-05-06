@@ -1,4 +1,10 @@
 /target/
+**/target/
+**/src-tauri/gen/
+/node_modules/
+**/node_modules/
+**/dist/
+**/.vite/
 /state/
 /logs/
 /tmp/

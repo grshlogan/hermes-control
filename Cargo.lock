@@ -762,6 +762,11 @@ name = "hermes-control-gui"
 version = "0.1.0"
 dependencies = [
  "hermes-control-types",
+ "reqwest 0.13.3",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "url",
 ]
 
 [[package]]

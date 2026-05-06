@@ -13,7 +13,9 @@ route config, and exposes explicit last-known-good rollback before updating
 daemon route state. Phase 7 is complete for the Rust bot code phase: the
 Telegram bot now uses Teloxide command enums, local SQLite polling-offset
 persistence, redacted event logs, and retry/continue behavior while remaining a
-daemon thin client.
+daemon thin client. Phase 8 has started with a Tauri v2 + React/TypeScript GUI
+scaffold that reads daemon state through typed client boundaries and exposes no
+shell, filesystem, or process capabilities.
 
 ## Phase Report
 
@@ -160,6 +162,25 @@ Phase 7 is complete for the Rust bot code phase:
 - Real Telegram token conversation smoke remains a deployment/runtime check; do
   not record raw bot tokens in this repository.
 
+Phase 8 has started:
+
+- `apps/hermes-control-gui` contains the Tauri v2 desktop app shell and
+  React/TypeScript front end.
+- `crates/hermes-control-gui` now provides `GuiConfig`, `GuiDaemonClient`,
+  `GuiDashboardSnapshot`, GUI requester helpers, and Tauri capability contracts.
+- The first GUI screen is an operations dashboard, not a landing page. It
+  surfaces overall health, active route, model readiness, WSL state, state DB,
+  providers, audit, logs placeholder, runtime, and settings surfaces.
+- The Tauri capability file is intentionally narrow:
+  `apps/hermes-control-gui/src-tauri/capabilities/default.json` grants only
+  `core:default`; no `shell:`, `fs:`, or process authority is configured.
+- The Tauri command boundary currently exposes `gui_dashboard_snapshot`, which
+  calls local daemon APIs with the configured bearer token.
+- The GUI now also exposes route switch dry-run preview, route rollback dry-run
+  preview, and daemon-owned log tail commands for `daemon`, `bot`, and `hermes`.
+  These are still daemon API calls; no direct WSL/Hermes/vLLM execution is
+  available in the GUI.
+
 ## Current Runtime Observation
 
 The last real runtime smoke observed on May 3, 2026:
@@ -191,15 +212,15 @@ Latest pushed commits:
 
 ## Current Phase
 
-Phase 7 code closeout is the current local unpushed work. After it is committed,
-the next planned implementation phase is Phase 8 GUI:
+Phase 8 GUI scaffold is the current local unpushed work:
 
-- Teloxide `HermesBotCommand` parser and command coverage tests.
-- Local SQLite bot `telegram_state` offset store.
-- Runtime bot long polling now resumes from persisted offset.
-- Redacted bot event log at `logs/bot/bot.log`.
-- Polling retry config through `HERMES_CONTROL_BOT_POLL_ERROR_RETRY_SECONDS`.
-- Read-only daemon log tail endpoint for bot logs commands.
+- Tauri v2 app scaffold under `apps/hermes-control-gui`.
+- React/TypeScript operations dashboard and view-model tests.
+- GUI Rust daemon-client boundary and Phase8 safety tests.
+- Tauri capability file proving no broad shell/filesystem/process permissions.
+- Route switch preview, rollback preview, and log target selection are wired.
+- Next GUI increment should add the confirmation sheet for non-dry-run
+  operations and controlled action buttons.
 
 ## Useful Commands
 
@@ -209,6 +230,17 @@ cargo fmt --all -- --check
 cargo test --workspace
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Phase 8 GUI checks:
+
+```powershell
+cd E:\WSL\Hermres\hermes-control\apps\hermes-control-gui
+npm test
+npm run build
+cd E:\WSL\Hermres\hermes-control
+cargo test -p hermes-control-gui --test phase8_gui_boundary
+cargo check --manifest-path apps\hermes-control-gui\src-tauri\Cargo.toml
 ```
 
 Install or refresh WSL root helpers:

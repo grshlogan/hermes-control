@@ -8,6 +8,9 @@ This map explains where to work in the Hermes Control Rust workspace.
 - `plan_rust_control_rewrite.md`: rewrite plan, phase order, authority model,
   and Tauri boundary.
 - `Cargo.toml`: workspace members and shared dependency policy.
+- `apps/hermes-control-gui`: Tauri v2 + React/TypeScript desktop app scaffold.
+  `src-tauri` is excluded from the root workspace so the normal Rust workspace
+  loop remains fast; validate it with its own manifest path.
 - `config/control.toml`: daemon, WSL, Hermes health, log, and policy facts.
   Current machine facts: WSL default user is `root`; Hermes health is
   `http://127.0.0.1:8642/health`.
@@ -154,9 +157,23 @@ This map explains where to work in the Hermes Control Rust workspace.
   - Must remain a thin daemon client.
 
 - `crates/hermes-control-gui`
-  - Future GUI boundary crate.
-  - Currently only proves GUI channel and no raw process execution.
-  - Real Tauri app belongs in Phase 8.
+  - GUI Rust boundary crate shared by the Tauri app.
+  - Provides `GuiConfig`, `GuiDaemonClient`, `GuiDashboardSnapshot`, GUI
+    requester helpers, route switch/rollback dry-run request builders, safe log
+    tail target helpers, and the Tauri capability contract.
+  - Must stay a daemon client; no raw WSL/Hermes/vLLM process control belongs
+    here.
+
+- `apps/hermes-control-gui`
+  - Tauri v2 app shell in `src-tauri`.
+  - React/TypeScript front end in `src`.
+  - `src-tauri/capabilities/default.json` grants only `core:default`; do not
+    add `shell:`, `fs:`, or process permissions without a new security review.
+  - Current front end is an operations dashboard with Dashboard, AI Route, Local
+    Models, Runtime, Logs, Audit, and Settings surfaces.
+  - Route and Logs surfaces currently support daemon dry-run previews and
+    daemon-owned log tailing; confirmation/execution controls remain a later
+    increment.
 
 - `crates/hermes-control-testkit`
   - Shared test helpers and fixtures.
@@ -185,6 +202,13 @@ This map explains where to work in the Hermes Control Rust workspace.
 - `crates/hermes-control-bot/tests/bot_boundary.rs`: bot allowlist, Teloxide
   command enum parsing, command mapping, offset persistence, redacted bot event
   logs, runtime config parsing, and no raw subprocess boundary.
+- `crates/hermes-control-gui/tests/phase8_gui_boundary.rs`: GUI daemon-client
+  config, GUI requester shape, Tauri capability safety, and no raw
+  shell/filesystem/process boundary, plus route rollback preview and safe log
+  target contracts.
+- `apps/hermes-control-gui/src/lib/viewModel.test.ts`: front-end dashboard view
+  model, route option flags, log target bounds, control-surface navigation, and
+  unsafe Tauri permission prefix documentation.
 - `crates/hermes-control-daemon/tests/phase3_api.rs`: daemon bearer auth,
   SQLite initialization, read-only API route behavior, and daemon log tailing.
 - `crates/hermes-control-core/tests/phase4_operation_plans.rs`: WSL/Hermes typed

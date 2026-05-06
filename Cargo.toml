@@ -8,6 +8,7 @@ members = [
     "crates/hermes-control-gui",
     "crates/hermes-control-testkit",
 ]
+exclude = ["apps/hermes-control-gui/src-tauri"]
 resolver = "3"
 
 [workspace.package]

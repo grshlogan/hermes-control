@@ -1212,17 +1212,27 @@ Completion signal:
 
 ### Phase 8 — Premium GUI
 
+Status: started. First increment has a Tauri v2 app scaffold, a React/TypeScript
+operations dashboard, a Rust daemon-client GUI boundary, and narrow Tauri
+capability tests.
+
 Goal:
 
 - Build high-quality local management panel.
 
 Codex tasks:
 
-- Create Tauri v2 app.
-- Add a Tauri Rust bridge that is only a typed daemon client.
+- Create Tauri v2 app. Started under `apps/hermes-control-gui`.
+- Add a Tauri Rust bridge that is only a typed daemon client. Started with
+  `gui_dashboard_snapshot`.
 - Define explicit Tauri capabilities/permissions for GUI and tray commands.
-- Create design-token layer.
-- Implement Dashboard, AI Route, Local Models, WSL, Hermes Runtime, Logs, Audit, Settings.
+  Started with `core:default` only for the main window; tray remains later.
+- Create design-token layer. Started in `src/styles.css` with a restrained
+  utility-console surface.
+- Implement Dashboard, AI Route, Local Models, WSL, Hermes Runtime, Logs, Audit,
+  Settings. Started as first-screen surfaces. Route dry-run preview, rollback
+  dry-run preview, and daemon/bot/hermes log target tailing are now wired;
+  confirmation-gated mutating controls remain later.
 - Implement confirmation sheet.
 - Implement tray icon.
 - Implement theme switching.

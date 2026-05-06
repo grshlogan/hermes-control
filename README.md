@@ -2,7 +2,7 @@
 
 Hermes Control 是一个面向 Windows + WSL2 的本地 AI 控制器。它的目标不是再做一个聊天客户端，而是接管本地 Hermes 运行栈的关键控制面：WSL2 生命周期、Hermes 进程、vLLM 本地模型运行时、Open WebUI 接入、路由切换、日志、健康检查和安全确认。
 
-当前项目已完成 Phase 5 基础收尾、Phase 6 route switcher 主闭环和 Phase 7 Teloxide bot 代码收尾：Rust 控制核心、CLI、daemon、bot 边界、WSL root helper、项目内 vLLM 运行时和 qwen36 MTP 实测链路已经建立；route switcher 已能应用 Hermes env patch，同步 Open WebUI 持久配置，在 Open WebUI 已运行时受控刷新进程，并支持显式回滚到 last-known-good route；bot 已迁移到 Teloxide command enum、本地 SQLite offset 状态和脱敏运行日志；GUI 和完整安装向导还在后续阶段。
+当前项目已完成 Phase 5 基础收尾、Phase 6 route switcher 主闭环和 Phase 7 Teloxide bot 代码收尾，并已进入 Phase 8 GUI：Rust 控制核心、CLI、daemon、bot 边界、WSL root helper、项目内 vLLM 运行时和 qwen36 MTP 实测链路已经建立；route switcher 已能应用 Hermes env patch，同步 Open WebUI 持久配置，在 Open WebUI 已运行时受控刷新进程，并支持显式回滚到 last-known-good route；bot 已迁移到 Teloxide command enum、本地 SQLite offset 状态和脱敏运行日志；GUI 已有 Tauri v2 + React/TypeScript 操作台骨架，完整安装向导还在后续阶段。
 
 ## 当前能力
 
@@ -27,10 +27,11 @@ Hermes Control 是一个面向 Windows + WSL2 的本地 AI 控制器。它的目
 - 固定 WSL root route-apply helper：切换前应用 Hermes env patch、重启并健康检查。
 - 显式 route rollback：CLI、daemon API 和 Telegram bot 边界均可触发 last-known-good 回滚。
 - Telegram bot 使用 Teloxide command enum，保留 allowlist 和 daemon thin-client 边界，并用本地 SQLite 记录 `telegram_state` offset，同时写入脱敏 `logs/bot/bot.log` 事件日志；Telegram 轮询或消息发送短暂失败时会记录并继续运行。
+- Tauri v2 GUI 骨架：`apps/hermes-control-gui` 首屏是本地操作台，读取 daemon dashboard snapshot，支持 route dry-run preview、rollback dry-run preview 和 daemon/bot/hermes 日志 tail；Tauri capability 当前只授予 `core:default`。
 
 仍在规划或后续阶段：
 
-- 完整 GUI。
+- 完整 GUI 操作闭环。
 - 一键 Fresh Install 向导。
 - Hermes/Open WebUI 接入自动化的完整安装向导。
 - benchmark 持久化和 GUI 展示。
@@ -45,9 +46,10 @@ hermes-control
 │  ├─ hermes-control-daemon    # Windows 本地 HTTP API daemon
 │  ├─ hermes-control-cli       # CLI thin client
 │  ├─ hermes-control-bot       # Telegram bot thin client
-│  ├─ hermes-control-gui       # 未来 GUI 边界 crate
+│  ├─ hermes-control-gui       # GUI daemon-client 边界 crate
 │  ├─ hermes-control-testkit   # 测试辅助
 │  └─ hermes-control-types     # API DTO 和共享类型
+├─ apps/hermes-control-gui      # Tauri v2 + React/TypeScript GUI
 ├─ config                      # daemon/provider/model runtime 配置
 ├─ docs                        # 变更记录、交接、代码地图、接入说明
 ├─ scripts/wsl-root            # 安装到 WSL /opt/hermes-control/bin 的 helper
@@ -94,6 +96,29 @@ cargo test --workspace
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 git diff --check
+```
+
+GUI 首轮开发：
+
+```powershell
+cd E:\WSL\Hermres\hermes-control\apps\hermes-control-gui
+npm install
+npm run dev
+```
+
+GUI 前端验证：
+
+```powershell
+npm test
+npm run build
+```
+
+Tauri 壳验证：
+
+```powershell
+cd E:\WSL\Hermres\hermes-control
+cargo test -p hermes-control-gui --test phase8_gui_boundary
+cargo check --manifest-path apps\hermes-control-gui\src-tauri\Cargo.toml
 ```
 
 ## WSL Root Helper 安装

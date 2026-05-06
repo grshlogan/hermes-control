@@ -404,3 +404,21 @@ unimplemented ideas here.
 - Added bot tests for `/start`, command mentions, `/audit` defaulting, Teloxide
   enum parsing, offset persistence across restarts, redacted event logs, runtime
   config parsing, and daemon log tailing.
+
+## 2026-05-06: Phase 8 Tauri GUI scaffold started
+
+- Added `apps/hermes-control-gui` as a Tauri v2 + React/TypeScript desktop app
+  scaffold.
+- Added a quiet operations-dashboard first screen with Dashboard, AI Route,
+  Local Models, Runtime, Logs, Audit, and Settings surfaces.
+- Added `GuiConfig`, `GuiDaemonClient`, `GuiDashboardSnapshot`, GUI requester
+  helpers, and route-switch request helpers to `crates/hermes-control-gui`.
+- Added Tauri command boundary `gui_dashboard_snapshot`, which calls local
+  daemon APIs instead of controlling WSL/Hermes/vLLM directly.
+- Added route switch dry-run preview, route rollback dry-run preview, and
+  daemon-owned log tail commands for `daemon`, `bot`, and `hermes`.
+- Wired the Route surface to provider options/current/LKG context and the Logs
+  surface to bounded log target selection.
+- Added `src-tauri/capabilities/default.json` with only `core:default`, plus
+  tests proving no broad `shell:`, `fs:`, or process authority is exposed.
+- Added front-end view-model tests and Rust Phase8 GUI boundary tests.
