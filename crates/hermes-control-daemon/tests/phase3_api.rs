@@ -6,7 +6,14 @@ use std::{
 use axum::{
     Router,
     body::{Body, to_bytes},
-    http::{Request, StatusCode, header::AUTHORIZATION},
+    http::{
+        Method, Request, StatusCode,
+        header::{
+            ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
+            ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_REQUEST_HEADERS,
+            ACCESS_CONTROL_REQUEST_METHOD, AUTHORIZATION, ORIGIN,
+        },
+    },
 };
 use hermes_control_daemon::build_router;
 use rusqlite::Connection;
@@ -26,6 +33,53 @@ async fn phase3_router_requires_bearer_auth() {
 
     let response = get(router, "/v1/providers", Some("wrong-token")).await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn phase3_router_allows_local_gui_cors_preflight() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/v1/status")
+                .header(ORIGIN, "http://localhost:5174")
+                .header(ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                .header(ACCESS_CONTROL_REQUEST_HEADERS, "authorization")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(ACCESS_CONTROL_ALLOW_ORIGIN),
+        Some(
+            &"http://localhost:5174"
+                .parse()
+                .expect("origin should parse")
+        )
+    );
+
+    let allow_headers = response
+        .headers()
+        .get(ACCESS_CONTROL_ALLOW_HEADERS)
+        .expect("allow headers should be present")
+        .to_str()
+        .expect("allow headers should be valid")
+        .to_ascii_lowercase();
+    assert!(allow_headers.contains("authorization"));
+
+    let allow_methods = response
+        .headers()
+        .get(ACCESS_CONTROL_ALLOW_METHODS)
+        .expect("allow methods should be present")
+        .to_str()
+        .expect("allow methods should be valid");
+    assert!(allow_methods.contains("GET"));
 }
 
 #[tokio::test]
@@ -76,6 +130,24 @@ async fn phase3_router_tails_daemon_logs_without_shell_execution() {
 
     assert_eq!(logs["target"], "daemon");
     assert_eq!(logs["lines"], serde_json::json!(["two", "three"]));
+}
+
+#[tokio::test]
+async fn phase3_router_tails_vllm_logs_from_model_runtime_log_dir() {
+    let fixture = Fixture::new();
+    let log_dir = fixture.root.join("vLLM/logs");
+    fs::create_dir_all(&log_dir).expect("log dir should create");
+    fs::write(
+        log_dir.join("live-qwen36-mtp.log"),
+        "boot\nloading\nready\n",
+    )
+    .expect("log should write");
+
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+    let logs = get_json(router, "/v1/logs/vllm?tail=2").await;
+
+    assert_eq!(logs["target"], "vllm");
+    assert_eq!(logs["lines"], serde_json::json!(["loading", "ready"]));
 }
 
 async fn get(router: Router, path: &str, token: Option<&str>) -> axum::response::Response {
@@ -187,7 +259,7 @@ workspace = "E:\\WSL\\Hermres\\hermes-control\\vLLM"
 wsl_distro = "Ubuntu-Hermes-Codex"
 endpoint = "http://127.0.0.1:9/v1"
 models_endpoint = "http://127.0.0.1:9/v1/models"
-log_dir = "E:\\WSL\\Hermres\\hermes-control\\vLLM\\logs"
+log_dir = "vLLM/logs"
 
 [[runtimes.variants]]
 id = "qwen36-mtp"

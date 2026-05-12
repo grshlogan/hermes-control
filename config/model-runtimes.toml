@@ -6,6 +6,7 @@ wsl_distro = "Ubuntu-Hermes-Codex"
 endpoint = "http://127.0.0.1:18080/v1"
 models_endpoint = "http://127.0.0.1:18080/v1/models"
 log_dir = "E:\\WSL\\Hermres\\hermes-control\\vLLM\\logs"
+model_root = "/root/Hermres/models"
 
 [[runtimes.variants]]
 id = "qwen36-awq-int4"
@@ -26,3 +27,14 @@ num_speculative_tokens = 2
 start = { kind = "wsl_script", script = "/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/start-qwen36-mtp.sh" }
 stop = { kind = "process_match", served_model_name = "qwen36-mtp" }
 profiles = ["vllm.qwen36-mtp"]
+
+[[runtimes.variants]]
+id = "qwen36-mtp-tuned"
+served_model_name = "qwen36-mtp-tuned"
+mode = "latency-tuned"
+max_model_len = 90000
+speculative_method = "mtp"
+num_speculative_tokens = 2
+start = { kind = "wsl_script", script = "/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/start-qwen36-mtp-tuned.sh" }
+stop = { kind = "process_match", served_model_name = "qwen36-mtp-tuned" }
+profiles = ["vllm.qwen36-mtp-tuned"]

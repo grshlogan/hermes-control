@@ -85,6 +85,7 @@ wsl_distro = "Ubuntu-Hermes-Codex"
 endpoint = "http://127.0.0.1:18080/v1"
 models_endpoint = "http://127.0.0.1:18080/v1/models"
 log_dir = "E:\\WSL\\Hermres\\hermes-control\\vLLM\\logs"
+model_root = "/root/Hermres/models"
 
 [[runtimes.variants]]
 id = "qwen36-mtp"
@@ -102,6 +103,10 @@ profiles = ["vllm.qwen36-mtp"]
 
     let variant = &runtimes.runtimes[0].variants[0];
     assert_eq!(variant.id, "qwen36-mtp");
+    assert_eq!(
+        runtimes.runtimes[0].model_root.as_deref(),
+        Some("/root/Hermres/models")
+    );
     assert_eq!(variant.max_model_len, 90000);
     assert_eq!(variant.start.kind, ModelRuntimeStartKind::WslScript);
     assert_eq!(variant.stop.kind, ModelRuntimeStopKind::ProcessMatch);

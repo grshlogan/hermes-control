@@ -1,4 +1,4 @@
-# Hermes Control
+﻿# Hermes Control
 
 Hermes Control 是一个面向 Windows + WSL2 的本地 AI 控制器。它的目标不是再做一个聊天客户端，而是接管本地 Hermes 运行栈的关键控制面：WSL2 生命周期、Hermes 进程、vLLM 本地模型运行时、Open WebUI 接入、路由切换、日志、健康检查和安全确认。
 
@@ -16,7 +16,7 @@ Hermes Control 是一个面向 Windows + WSL2 的本地 AI 控制器。它的目
 - 项目自有 vLLM 运行时目录：
   `E:\WSL\Hermres\hermes-control\vLLM`
 - 外部模型权重目录：
-  `E:\WSL\vLLM\models`
+  `/root/Hermres/models`
 - vLLM bootstrap / start / stop / health / logs helper。
 - MTP 启动失败时回退到 AWQ 稳定 profile 的 root helper 边界。
 - `qwen36-mtp` MTP 模型实测启动和调用。
@@ -27,11 +27,11 @@ Hermes Control 是一个面向 Windows + WSL2 的本地 AI 控制器。它的目
 - 固定 WSL root route-apply helper：切换前应用 Hermes env patch、重启并健康检查。
 - 显式 route rollback：CLI、daemon API 和 Telegram bot 边界均可触发 last-known-good 回滚。
 - Telegram bot 使用 Teloxide command enum，保留 allowlist 和 daemon thin-client 边界，并用本地 SQLite 记录 `telegram_state` offset，同时写入脱敏 `logs/bot/bot.log` 事件日志；Telegram 轮询或消息发送短暂失败时会记录并继续运行。
-- Tauri v2 GUI 骨架：`apps/hermes-control-gui` 首屏是本地操作台，读取 daemon dashboard snapshot，支持 route dry-run preview、rollback dry-run preview 和 daemon/bot/hermes 日志 tail；Tauri capability 当前只授予 `core:default`。
+- Tauri v2 GUI 骨架：`apps/hermes-control-gui` 首屏是本地操作台，读取 daemon dashboard snapshot，支持 route dry-run preview、route switch 执行、rollback dry-run preview、rollback 执行、Local Models install/start/stop/restart/health/logs/benchmark preview/run、WSL wake/stop/restart/shutdown preview/run、Hermes wake/stop/restart/kill preview/run、daemon confirmation confirm/cancel、daemon/bot/hermes/vLLM 日志 tail 与过滤、audit 过滤，以及 Settings 里的 daemon 连接配置/连接测试和语言切换；GUI 默认简体中文，Tauri capability 当前只授予 `core:default`。
 
 仍在规划或后续阶段：
 
-- 完整 GUI 操作闭环。
+- Settings 中 token rotation、secret refs、service install 等更高阶本机配置闭环。
 - 一键 Fresh Install 向导。
 - Hermes/Open WebUI 接入自动化的完整安装向导。
 - benchmark 持久化和 GUI 展示。
@@ -41,6 +41,8 @@ Hermes Control 是一个面向 Windows + WSL2 的本地 AI 控制器。它的目
 
 ```text
 hermes-control
+├─ start-hermes-control.ps1    # Windows 本地启动脚本：daemon + GUI
+├─ stop-hermes-control.ps1     # Windows 本地停止脚本：默认只停本软件进程
 ├─ crates
 │  ├─ hermes-control-core      # 状态采集、计划生成、typed operation core
 │  ├─ hermes-control-daemon    # Windows 本地 HTTP API daemon
@@ -62,7 +64,7 @@ hermes-control
 
 `E:\WSL\Hermres\hermes-control\vLLM` 是软件自有的 vLLM 运行环境，里面可以放 venv、cache、logs、scripts。
 
-`E:\WSL\vLLM\models` 只是模型权重仓库。安装、修复、清理流程默认不得删除这里的模型文件。
+`/root/Hermres/models` 只是模型权重仓库。安装、修复、清理流程默认不得删除这里的模型文件。
 
 WSL 内 root helper 安装到：
 
@@ -98,6 +100,49 @@ cargo clippy --workspace --all-targets -- -D warnings
 git diff --check
 ```
 
+启动/关闭本地软件：
+
+```powershell
+.\start-hermes-control.ps1
+.\stop-hermes-control.ps1
+```
+
+默认启动 Windows daemon 和 Web GUI 预览。Web GUI 地址是：
+
+```text
+http://127.0.0.1:5174/
+```
+
+默认 API token 是 `phase8-dev-token`，daemon 地址是
+`http://127.0.0.1:18787`。如需强制接管已有进程：
+
+```powershell
+.\start-hermes-control.ps1 -Force
+```
+
+daemon 运行日志写入：
+
+```text
+logs\daemon\local-run.out.log
+logs\daemon\local-run.err.log
+```
+
+GUI/Vite 预览日志写入：
+
+```text
+logs\local-run\gui-web.out.log
+logs\local-run\gui-web.err.log
+```
+
+默认关闭脚本只停止 hermes-control 的 Windows daemon 和 GUI，不会停止 WSL、
+Hermes 或 vLLM。需要额外停止运行栈时显式传参：
+
+```powershell
+.\stop-hermes-control.ps1 -StopVllm
+.\stop-hermes-control.ps1 -StopHermes
+.\stop-hermes-control.ps1 -ShutdownWsl
+```
+
 GUI 首轮开发：
 
 ```powershell
@@ -105,6 +150,25 @@ cd E:\WSL\Hermres\hermes-control\apps\hermes-control-gui
 npm install
 npm run dev
 ```
+
+浏览器预览连接 daemon：
+
+```powershell
+cd E:\WSL\Hermres\hermes-control
+$env:HERMES_CONTROL_API_TOKEN = "phase8-dev-token"
+cargo run -p hermes-control-daemon
+```
+
+然后在 GUI Settings 里设置：
+
+```text
+Daemon URL: http://127.0.0.1:18787
+API Token: phase8-dev-token
+```
+
+API Token 必须等于启动 daemon 时的 `HERMES_CONTROL_API_TOKEN`。浏览器预览从
+`http://localhost:5174` 访问 `http://127.0.0.1:18787` 时由 daemon 的本地
+CORS 边界放行；认证仍然走 bearer token。
 
 GUI 前端验证：
 

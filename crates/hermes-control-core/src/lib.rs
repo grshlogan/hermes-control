@@ -665,6 +665,109 @@ pub fn parse_wsl_list_verbose(output: &str) -> Vec<WslDistroStatus> {
         .collect()
 }
 
+pub fn parse_wsl_hostname_ips(output: &str) -> Vec<String> {
+    output
+        .split_whitespace()
+        .filter(|part| {
+            part.chars()
+                .all(|character| character.is_ascii_digit() || character == '.')
+        })
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+pub fn build_wsl_models_endpoint(models_endpoint: &str, wsl_ip: &str) -> Option<String> {
+    let localhost_prefixes = ["http://127.0.0.1:", "http://localhost:"];
+    let prefix = localhost_prefixes
+        .iter()
+        .find(|prefix| models_endpoint.starts_with(**prefix))?;
+    Some(models_endpoint.replacen(prefix, &format!("http://{wsl_ip}:"), 1))
+}
+
+pub fn run_wsl_hostname_ips(distro: &str, user: &str) -> Result<Vec<String>, ConfigError> {
+    let output = Command::new(FixedProgram::WslExe.executable())
+        .args([
+            "--distribution",
+            distro,
+            "--user",
+            user,
+            "--exec",
+            "hostname",
+            "-I",
+        ])
+        .output()?;
+
+    if !output.status.success() {
+        return Err(ConfigError::CommandFailed {
+            program: FixedProgram::WslExe.executable(),
+            status: output.status.to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        });
+    }
+
+    Ok(parse_wsl_hostname_ips(&decode_command_output(
+        &output.stdout,
+    )))
+}
+
+pub fn vllm_helper_response_ready(
+    body: &str,
+    served_model_name: &str,
+) -> Result<bool, ConfigError> {
+    let value = serde_json::from_str::<Value>(body)?;
+    Ok(value.get("ready").and_then(Value::as_bool).unwrap_or(false)
+        && value
+            .get("served_model_name")
+            .and_then(Value::as_str)
+            .is_some_and(|model| model == served_model_name))
+}
+
+pub fn vllm_health_command(
+    distro: &str,
+    user: &str,
+    models_endpoint: &str,
+    served_model_name: &str,
+) -> FixedCommand {
+    FixedCommand {
+        program: FixedProgram::WslExe,
+        args: vec![
+            "--distribution".to_owned(),
+            distro.to_owned(),
+            "--user".to_owned(),
+            user.to_owned(),
+            "--exec".to_owned(),
+            "/usr/bin/env".to_owned(),
+            format!("HERMES_CONTROL_VLLM_MODELS_ENDPOINT_OVERRIDE={models_endpoint}"),
+            format!("{HERMES_CONTROL_WSL_BIN}/{HERMES_CONTROL_VLLM_HEALTH_SCRIPT}"),
+            served_model_name.to_owned(),
+            "1".to_owned(),
+            "ready".to_owned(),
+        ],
+    }
+}
+
+pub fn run_wsl_vllm_health(
+    distro: &str,
+    user: &str,
+    models_endpoint: &str,
+    served_model_name: &str,
+) -> Result<String, ConfigError> {
+    let command = vllm_health_command(distro, user, models_endpoint, served_model_name);
+    let output = Command::new(command.program.executable())
+        .args(&command.args)
+        .output()?;
+
+    if !output.status.success() {
+        return Err(ConfigError::CommandFailed {
+            program: FixedProgram::WslExe.executable(),
+            status: output.status.to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        });
+    }
+
+    Ok(decode_command_output(&output.stdout))
+}
+
 pub fn models_response_has_model(body: &str, served_model_name: &str) -> Result<bool, ConfigError> {
     let value = serde_json::from_str::<Value>(body)?;
     Ok(value
@@ -778,6 +881,50 @@ async fn check_model_endpoint(
     }
 }
 
+async fn check_model_endpoint_candidates(
+    models_endpoints: &[String],
+    served_model_name: &str,
+) -> (EndpointStatus, bool) {
+    let mut last = None;
+    for endpoint in models_endpoints {
+        let (status, ready) = check_model_endpoint(endpoint, served_model_name).await;
+        if ready {
+            return (status, true);
+        }
+        last = Some(status);
+    }
+
+    (
+        last.unwrap_or_else(|| {
+            EndpointStatus::unavailable("unknown", "no model endpoint configured")
+        }),
+        false,
+    )
+}
+
+fn check_model_with_wsl_helper(
+    distro: &str,
+    user: &str,
+    models_endpoint: &str,
+    served_model_name: &str,
+) -> Option<(EndpointStatus, bool)> {
+    let body = run_wsl_vllm_health(distro, user, models_endpoint, served_model_name).ok()?;
+    let value = serde_json::from_str::<Value>(&body).ok()?;
+    let endpoint = value
+        .get("models_endpoint")
+        .and_then(Value::as_str)
+        .unwrap_or("wsl:vllm-health");
+    let ready = vllm_helper_response_ready(&body, served_model_name).unwrap_or(false);
+    if ready {
+        Some((EndpointStatus::ok(endpoint, 200), true))
+    } else {
+        Some((
+            EndpointStatus::unavailable(endpoint, "WSL vLLM health helper reports not ready"),
+            false,
+        ))
+    }
+}
+
 pub async fn collect_read_only_status(
     config_dir: impl AsRef<Path>,
 ) -> Result<ReadOnlyStatus, ConfigError> {
@@ -793,17 +940,44 @@ pub async fn collect_read_only_status(
             .into_iter()
             .find(|distro| distro.name == config.control.wsl.distro)
     });
+    let wsl_ips =
+        run_wsl_hostname_ips(&config.control.wsl.distro, &config.control.wsl.default_user)
+            .unwrap_or_default();
     let hermes = check_endpoint(&config.control.hermes.health_url).await;
 
     let mut models = Vec::new();
     for runtime in &config.model_runtimes.runtimes {
         for variant in &runtime.variants {
-            let (endpoint, ready) =
-                check_model_endpoint(&runtime.models_endpoint, &variant.served_model_name).await;
+            let mut endpoints = vec![runtime.models_endpoint.clone()];
+            endpoints.extend(
+                wsl_ips
+                    .iter()
+                    .filter_map(|ip| build_wsl_models_endpoint(&runtime.models_endpoint, ip)),
+            );
+            endpoints.dedup();
+            let (mut endpoint, mut ready) =
+                check_model_endpoint_candidates(&endpoints, &variant.served_model_name).await;
+            if !ready {
+                for candidate in &endpoints {
+                    if let Some((helper_endpoint, helper_ready)) = check_model_with_wsl_helper(
+                        &runtime.wsl_distro,
+                        &config.control.wsl.default_user,
+                        candidate,
+                        &variant.served_model_name,
+                    ) {
+                        endpoint = helper_endpoint;
+                        ready = helper_ready;
+                        if ready {
+                            break;
+                        }
+                    }
+                }
+            }
             models.push(ModelRuntimeSummary {
                 runtime_id: runtime.id.clone(),
                 variant_id: variant.id.clone(),
                 served_model_name: variant.served_model_name.clone(),
+                model_root: runtime.model_root.clone(),
                 endpoint,
                 ready,
             });

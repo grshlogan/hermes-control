@@ -20,6 +20,11 @@ rules below are specific to the Hermes Rust control rewrite.
 - `hermes-control-daemon` will be the only state-mutating authority.
 - `hermes-control-cli`, `hermes-control-bot`, and the future GUI are thin
   clients.
+- GUI is the highest client authority surface because it is local to the
+  Windows desktop. It may expose more typed daemon operations than Telegram.
+- Telegram bot is remote by nature and should remain narrower by default; GUI
+  capability must cover normal bot operations, but bot capability does not need
+  to mirror every GUI operation.
 - Bot and GUI must call daemon API or named-pipe client code, not `wsl.exe`,
   PowerShell, shell scripts, or arbitrary subprocess APIs directly.
 - External machine operations must be represented as typed Rust operations.

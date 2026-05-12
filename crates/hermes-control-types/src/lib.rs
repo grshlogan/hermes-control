@@ -181,6 +181,8 @@ pub struct ModelRuntimeConfig {
     pub endpoint: String,
     pub models_endpoint: String,
     pub log_dir: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_root: Option<String>,
     #[serde(default)]
     pub variants: Vec<ModelRuntimeVariant>,
 }
@@ -287,6 +289,8 @@ pub struct ModelRuntimeSummary {
     pub runtime_id: String,
     pub variant_id: String,
     pub served_model_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_root: Option<String>,
     pub endpoint: EndpointStatus,
     pub ready: bool,
 }

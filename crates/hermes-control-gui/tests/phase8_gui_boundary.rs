@@ -1,10 +1,15 @@
 use std::path::Path;
 
 use hermes_control_gui::{
-    GuiConfig, GuiDaemonCommand, GuiLogTarget, gui_boundary, gui_tauri_capability, log_tail_path,
-    route_rollback_request, route_switch_request,
+    GuiConfig, GuiDaemonCommand, GuiLogTarget, gui_boundary, gui_connection_summary_from_env_iter,
+    gui_tauri_capability, hermes_action_request, log_tail_path, model_action_request,
+    operation_cancel_request, operation_confirm_request, route_rollback_request,
+    route_switch_request, wsl_action_request,
 };
-use hermes_control_types::{RequesterChannel, RouteRollbackRequest, RouteSwitchRequest};
+use hermes_control_types::{
+    ActionRequest, CancelRequest, ConfirmRequest, HermesAction, ModelAction, RequesterChannel,
+    RouteRollbackRequest, RouteSwitchRequest, WslAction,
+};
 
 #[test]
 fn gui_keeps_existing_thin_client_boundary() {
@@ -26,6 +31,35 @@ fn gui_config_reads_local_daemon_client_settings() {
     assert_eq!(config.daemon_base_url().as_str(), "http://127.0.0.1:18787/");
     assert_eq!(config.api_token(), "daemon-token");
     assert_eq!(config.operator_id(), "desktop-operator");
+}
+
+#[test]
+fn gui_connection_summary_redacts_token_for_renderer_settings() {
+    let summary = gui_connection_summary_from_env_iter([
+        ("HERMES_CONTROL_DAEMON_URL", "http://127.0.0.1:18787"),
+        ("HERMES_CONTROL_API_TOKEN", "phase8-secret-token"),
+        ("HERMES_CONTROL_GUI_OPERATOR_ID", "desktop-operator"),
+    ])
+    .expect("connection summary should parse");
+
+    assert_eq!(summary.daemon_url, "http://127.0.0.1:18787/");
+    assert_eq!(summary.operator_id, "desktop-operator");
+    assert!(summary.token_configured);
+    assert_eq!(summary.token_label, "****oken");
+}
+
+#[test]
+fn gui_connection_summary_handles_missing_token_without_blocking_settings() {
+    let summary = gui_connection_summary_from_env_iter([
+        ("HERMES_CONTROL_DAEMON_URL", "http://127.0.0.1:18787"),
+        ("HERMES_CONTROL_GUI_OPERATOR_ID", ""),
+    ])
+    .expect("settings summary should not require a token");
+
+    assert_eq!(summary.daemon_url, "http://127.0.0.1:18787/");
+    assert_eq!(summary.operator_id, "local-gui");
+    assert!(!summary.token_configured);
+    assert_eq!(summary.token_label, "not set");
 }
 
 #[test]
@@ -66,6 +100,93 @@ fn route_rollback_request_uses_gui_requester_and_dry_run_default() {
 }
 
 #[test]
+fn route_switch_execute_request_uses_gui_requester_without_dry_run() {
+    let request = route_switch_request("external.deepseek", "desktop-operator", false);
+
+    assert_eq!(request.requester.channel, RequesterChannel::Gui);
+    assert_eq!(request.profile_id, "external.deepseek");
+    assert_eq!(request.reason, "GUI route switch external.deepseek");
+    assert!(!request.dry_run);
+}
+
+#[test]
+fn confirmation_lifecycle_requests_use_gui_requester() {
+    assert_eq!(
+        operation_confirm_request("HERMES-7421", "desktop-operator"),
+        ConfirmRequest {
+            requester: hermes_control_types::Requester {
+                channel: RequesterChannel::Gui,
+                user_id: "desktop-operator".to_owned(),
+                chat_id: None,
+            },
+            code: "HERMES-7421".to_owned(),
+        }
+    );
+    assert_eq!(
+        operation_cancel_request("desktop-operator"),
+        CancelRequest {
+            requester: hermes_control_types::Requester {
+                channel: RequesterChannel::Gui,
+                user_id: "desktop-operator".to_owned(),
+                chat_id: None,
+            },
+        }
+    );
+}
+
+#[test]
+fn model_action_request_uses_gui_requester_and_action_reason() {
+    assert_eq!(
+        model_action_request(
+            ModelAction::Restart,
+            "qwen36-mtp",
+            "desktop-operator",
+            false
+        ),
+        ActionRequest {
+            requester: hermes_control_types::Requester {
+                channel: RequesterChannel::Gui,
+                user_id: "desktop-operator".to_owned(),
+                chat_id: None,
+            },
+            action: ModelAction::Restart,
+            reason: "GUI model restart qwen36-mtp".to_owned(),
+            dry_run: false,
+        }
+    );
+}
+
+#[test]
+fn runtime_action_requests_use_gui_requester_and_action_reason() {
+    assert_eq!(
+        wsl_action_request(WslAction::RestartDistro, "desktop-operator", false),
+        ActionRequest {
+            requester: hermes_control_types::Requester {
+                channel: RequesterChannel::Gui,
+                user_id: "desktop-operator".to_owned(),
+                chat_id: None,
+            },
+            action: WslAction::RestartDistro,
+            reason: "GUI WSL restart distro".to_owned(),
+            dry_run: false,
+        }
+    );
+    assert_eq!(
+        hermes_action_request(HermesAction::Kill, "desktop-operator", true),
+        ActionRequest {
+            requester: hermes_control_types::Requester {
+                channel: RequesterChannel::Gui,
+                user_id: "desktop-operator".to_owned(),
+                chat_id: None,
+            },
+            action: HermesAction::Kill,
+            reason: "GUI Hermes kill".to_owned(),
+            dry_run: true,
+        }
+    );
+}
+
+#[test]
 fn log_tail_path_accepts_only_gui_safe_log_targets() {
     assert_eq!(
         log_tail_path(GuiLogTarget::Daemon, 120).expect("daemon target should be valid"),
@@ -80,11 +201,15 @@ fn log_tail_path_accepts_only_gui_safe_log_targets() {
         "/v1/logs/hermes?tail=1000"
     );
     assert_eq!(
+        log_tail_path(GuiLogTarget::Vllm, 200).expect("vLLM target should be valid"),
+        "/v1/logs/vllm?tail=200"
+    );
+    assert_eq!(
         GuiLogTarget::all()
             .iter()
             .map(|target| target.as_str())
             .collect::<Vec<_>>(),
-        vec!["daemon", "bot", "hermes"]
+        vec!["daemon", "bot", "hermes", "vllm"]
     );
 }
 
@@ -93,6 +218,16 @@ fn gui_daemon_commands_do_not_include_raw_process_or_filesystem_access() {
     let commands = GuiDaemonCommand::all();
     assert!(commands.contains(&GuiDaemonCommand::DashboardSnapshot));
     assert!(commands.contains(&GuiDaemonCommand::RouteSwitchPreview));
+    assert!(commands.contains(&GuiDaemonCommand::RouteSwitchExecute));
+    assert!(commands.contains(&GuiDaemonCommand::RouteRollbackExecute));
+    assert!(commands.contains(&GuiDaemonCommand::ConfirmOperation));
+    assert!(commands.contains(&GuiDaemonCommand::CancelOperation));
+    assert!(commands.contains(&GuiDaemonCommand::ModelActionPreview));
+    assert!(commands.contains(&GuiDaemonCommand::ModelActionExecute));
+    assert!(commands.contains(&GuiDaemonCommand::WslActionPreview));
+    assert!(commands.contains(&GuiDaemonCommand::WslActionExecute));
+    assert!(commands.contains(&GuiDaemonCommand::HermesActionPreview));
+    assert!(commands.contains(&GuiDaemonCommand::HermesActionExecute));
     assert!(commands.contains(&GuiDaemonCommand::LogsTail));
 
     for command in commands {

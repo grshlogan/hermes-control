@@ -18,8 +18,38 @@ export interface ModelRuntimeSummary {
   runtime_id: string;
   variant_id: string;
   served_model_name: string;
+  model_root?: string | null;
   endpoint: EndpointStatus;
   ready: boolean;
+}
+
+export type ModelActionId =
+  | 'Install'
+  | 'Start'
+  | 'Stop'
+  | 'Restart'
+  | 'Health'
+  | 'Logs'
+  | 'Benchmark';
+
+export interface ModelActionOptionViewModel {
+  id: ModelActionId;
+  label: string;
+  riskHint: string;
+}
+
+export interface ModelActionProgressViewModel {
+  message: string;
+  longRunning: boolean;
+}
+
+export type WslActionId = 'Wake' | 'StopDistro' | 'RestartDistro' | 'ShutdownAll';
+export type HermesActionId = 'Wake' | 'Stop' | 'Restart' | 'Kill';
+
+export interface RuntimeActionOptionViewModel<T extends string> {
+  id: T;
+  label: string;
+  riskHint: string;
 }
 
 export interface StateSummary {
@@ -88,8 +118,33 @@ export interface RouteOptionViewModel {
 }
 
 export interface LogTargetViewModel {
-  id: 'daemon' | 'bot' | 'hermes';
+  id: LogTargetId;
   label: string;
+}
+
+export type LogTargetId = 'daemon' | 'bot' | 'hermes' | 'vllm';
+
+export interface GuiConnectionSettings {
+  daemonUrl: string;
+  apiToken: string;
+  operatorId: string;
+}
+
+export interface GuiConnectionSummary {
+  daemon_url: string;
+  operator_id: string;
+  token_configured: boolean;
+  token_label: string;
+}
+
+export interface SettingsViewModel {
+  modeLabel: string;
+  storageLabel: string;
+  daemonUrl: string;
+  operatorId: string;
+  tokenLabel: string;
+  tokenConfigured: boolean;
+  canEditConnection: boolean;
 }
 
 export interface OperationResponse {
@@ -102,6 +157,21 @@ export interface OperationResponse {
   confirmation_id?: string | null;
   code_hint?: string | null;
   expires_at?: string | null;
+}
+
+export interface ConfirmationLifecycleResponse {
+  status: string;
+  confirmation_id: string;
+  summary: string;
+  execution_status?: string | null;
+}
+
+export interface ConfirmationPromptViewModel {
+  confirmationId: string;
+  codeHint: string;
+  expiresAt: string;
+  summary: string;
+  risk: string;
 }
 
 export interface GuiLogTail {

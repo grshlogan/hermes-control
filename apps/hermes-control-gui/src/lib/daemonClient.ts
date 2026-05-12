@@ -1,15 +1,20 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { GuiDashboardSnapshot, GuiLogTail, OperationResponse } from './types';
-
-interface BrowserGuiSettings {
-  daemonUrl: string;
-  apiToken: string;
-  operatorId: string;
-}
+import type {
+  ConfirmationLifecycleResponse,
+  GuiConnectionSettings,
+  GuiConnectionSummary,
+  GuiDashboardSnapshot,
+  GuiLogTail,
+  HermesActionId,
+  LogTargetId,
+  ModelActionId,
+  OperationResponse,
+  WslActionId,
+} from './types';
 
 const SETTINGS_KEY = 'hermes-control-gui-settings';
 
-export function readBrowserSettings(): BrowserGuiSettings {
+export function readBrowserSettings(): GuiConnectionSettings {
   if (typeof window === 'undefined') {
     return { daemonUrl: 'http://127.0.0.1:18787', apiToken: '', operatorId: 'browser-gui' };
   }
@@ -20,7 +25,7 @@ export function readBrowserSettings(): BrowserGuiSettings {
   }
 
   try {
-    const parsed = JSON.parse(stored) as Partial<BrowserGuiSettings>;
+    const parsed = JSON.parse(stored) as Partial<GuiConnectionSettings>;
     return {
       daemonUrl: parsed.daemonUrl || 'http://127.0.0.1:18787',
       apiToken: parsed.apiToken || '',
@@ -31,8 +36,25 @@ export function readBrowserSettings(): BrowserGuiSettings {
   }
 }
 
-export function saveBrowserSettings(settings: BrowserGuiSettings): void {
+export function saveBrowserSettings(settings: GuiConnectionSettings): void {
   window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+export function isDesktopRuntime(): boolean {
+  return isTauriRuntime();
+}
+
+export async function loadConnectionSummary(): Promise<GuiConnectionSettings> {
+  if (isTauriRuntime()) {
+    const summary = await invoke<GuiConnectionSummary>('gui_connection_summary');
+    return {
+      daemonUrl: summary.daemon_url,
+      apiToken: summary.token_configured ? summary.token_label : '',
+      operatorId: summary.operator_id,
+    };
+  }
+
+  return readBrowserSettings();
 }
 
 export async function loadDashboardSnapshot(): Promise<GuiDashboardSnapshot> {
@@ -57,6 +79,20 @@ export async function previewRouteSwitch(profileId: string): Promise<OperationRe
   }) as Promise<OperationResponse>;
 }
 
+export async function executeRouteSwitch(profileId: string): Promise<OperationResponse> {
+  if (isTauriRuntime()) {
+    return invoke<OperationResponse>('gui_route_switch_execute', { profileId });
+  }
+
+  const settings = readBrowserSettings();
+  return postJson(settings, '/v1/route/switch', {
+    requester: guiRequester(settings.operatorId),
+    profile_id: profileId,
+    reason: `GUI route switch ${profileId}`,
+    dry_run: false,
+  }) as Promise<OperationResponse>;
+}
+
 export async function previewRouteRollback(): Promise<OperationResponse> {
   if (isTauriRuntime()) {
     return invoke<OperationResponse>('gui_route_rollback_preview');
@@ -70,16 +106,147 @@ export async function previewRouteRollback(): Promise<OperationResponse> {
   }) as Promise<OperationResponse>;
 }
 
-export async function loadLogTail(target: 'daemon' | 'bot' | 'hermes'): Promise<GuiLogTail> {
+export async function executeRouteRollback(): Promise<OperationResponse> {
   if (isTauriRuntime()) {
-    return invoke<GuiLogTail>('gui_log_tail', { target, tail: 200 });
+    return invoke<OperationResponse>('gui_route_rollback_execute');
   }
 
-  return getJson(readBrowserSettings(), `/v1/logs/${target}?tail=200`) as Promise<GuiLogTail>;
+  const settings = readBrowserSettings();
+  return postJson(settings, '/v1/route/rollback', {
+    requester: guiRequester(settings.operatorId),
+    reason: 'GUI route rollback',
+    dry_run: false,
+  }) as Promise<OperationResponse>;
+}
+
+export async function confirmOperation(code: string): Promise<ConfirmationLifecycleResponse> {
+  if (isTauriRuntime()) {
+    return invoke<ConfirmationLifecycleResponse>('gui_confirm_operation', { code });
+  }
+
+  const settings = readBrowserSettings();
+  return postJson(settings, '/v1/confirm', {
+    requester: guiRequester(settings.operatorId),
+    code,
+  }) as Promise<ConfirmationLifecycleResponse>;
+}
+
+export async function cancelOperation(): Promise<ConfirmationLifecycleResponse> {
+  if (isTauriRuntime()) {
+    return invoke<ConfirmationLifecycleResponse>('gui_cancel_operation');
+  }
+
+  const settings = readBrowserSettings();
+  return postJson(settings, '/v1/cancel', {
+    requester: guiRequester(settings.operatorId),
+  }) as Promise<ConfirmationLifecycleResponse>;
+}
+
+export async function previewModelAction(
+  modelId: string,
+  action: ModelActionId,
+): Promise<OperationResponse> {
+  if (isTauriRuntime()) {
+    return invoke<OperationResponse>('gui_model_action_preview', { modelId, action });
+  }
+
+  const settings = readBrowserSettings();
+  return postJson(settings, `/v1/models/${modelId}/action`, {
+    requester: guiRequester(settings.operatorId),
+    action,
+    reason: `GUI model ${action.toLowerCase()} ${modelId}`,
+    dry_run: true,
+  }) as Promise<OperationResponse>;
+}
+
+export async function executeModelAction(
+  modelId: string,
+  action: ModelActionId,
+): Promise<OperationResponse> {
+  if (isTauriRuntime()) {
+    return invoke<OperationResponse>('gui_model_action_execute', { modelId, action });
+  }
+
+  const settings = readBrowserSettings();
+  return postJson(settings, `/v1/models/${modelId}/action`, {
+    requester: guiRequester(settings.operatorId),
+    action,
+    reason: `GUI model ${action.toLowerCase()} ${modelId}`,
+    dry_run: false,
+  }) as Promise<OperationResponse>;
+}
+
+export async function previewWslAction(action: WslActionId): Promise<OperationResponse> {
+  if (isTauriRuntime()) {
+    return invoke<OperationResponse>('gui_wsl_action_preview', { action });
+  }
+
+  const settings = readBrowserSettings();
+  return postJson(settings, '/v1/wsl/action', {
+    requester: guiRequester(settings.operatorId),
+    action,
+    reason: `GUI WSL ${runtimeActionReason(action)}`,
+    dry_run: true,
+  }) as Promise<OperationResponse>;
+}
+
+export async function executeWslAction(action: WslActionId): Promise<OperationResponse> {
+  if (isTauriRuntime()) {
+    return invoke<OperationResponse>('gui_wsl_action_execute', { action });
+  }
+
+  const settings = readBrowserSettings();
+  return postJson(settings, '/v1/wsl/action', {
+    requester: guiRequester(settings.operatorId),
+    action,
+    reason: `GUI WSL ${runtimeActionReason(action)}`,
+    dry_run: false,
+  }) as Promise<OperationResponse>;
+}
+
+export async function previewHermesAction(action: HermesActionId): Promise<OperationResponse> {
+  if (isTauriRuntime()) {
+    return invoke<OperationResponse>('gui_hermes_action_preview', { action });
+  }
+
+  const settings = readBrowserSettings();
+  return postJson(settings, '/v1/hermes/action', {
+    requester: guiRequester(settings.operatorId),
+    action,
+    reason: `GUI Hermes ${runtimeActionReason(action)}`,
+    dry_run: true,
+  }) as Promise<OperationResponse>;
+}
+
+export async function executeHermesAction(action: HermesActionId): Promise<OperationResponse> {
+  if (isTauriRuntime()) {
+    return invoke<OperationResponse>('gui_hermes_action_execute', { action });
+  }
+
+  const settings = readBrowserSettings();
+  return postJson(settings, '/v1/hermes/action', {
+    requester: guiRequester(settings.operatorId),
+    action,
+    reason: `GUI Hermes ${runtimeActionReason(action)}`,
+    dry_run: false,
+  }) as Promise<OperationResponse>;
+}
+
+export async function loadLogTail(
+  target: LogTargetId,
+  tail = 200,
+): Promise<GuiLogTail> {
+  const safeTail = Math.max(1, Math.min(1000, Math.trunc(tail)));
+
+  if (isTauriRuntime()) {
+    return invoke<GuiLogTail>('gui_log_tail', { target, tail: safeTail });
+  }
+
+  return getJson(readBrowserSettings(), `/v1/logs/${target}?tail=${safeTail}`) as Promise<GuiLogTail>;
 }
 
 async function loadDashboardSnapshotViaHttp(
-  settings: BrowserGuiSettings,
+  settings: GuiConnectionSettings,
 ): Promise<GuiDashboardSnapshot> {
   if (!settings.apiToken) {
     throw new Error('Set HERMES_CONTROL_API_TOKEN in the desktop app environment or browser settings.');
@@ -102,7 +269,7 @@ async function loadDashboardSnapshotViaHttp(
   } as GuiDashboardSnapshot;
 }
 
-async function getJson(settings: BrowserGuiSettings, path: string): Promise<unknown> {
+async function getJson(settings: GuiConnectionSettings, path: string): Promise<unknown> {
   const url = new URL(path, settings.daemonUrl);
   const response = await fetch(url, {
     headers: {
@@ -116,7 +283,7 @@ async function getJson(settings: BrowserGuiSettings, path: string): Promise<unkn
 }
 
 async function postJson(
-  settings: BrowserGuiSettings,
+  settings: GuiConnectionSettings,
   path: string,
   body: unknown,
 ): Promise<unknown> {
@@ -145,6 +312,10 @@ function guiRequester(operatorId: string) {
     user_id: operatorId,
     chat_id: null,
   };
+}
+
+function runtimeActionReason(action: string): string {
+  return action.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
 }
 
 function isTauriRuntime(): boolean {

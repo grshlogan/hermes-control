@@ -10,23 +10,30 @@ use std::{
 use axum::{
     Json, Router,
     extract::{Path as AxumPath, Query, State},
-    http::{HeaderMap, StatusCode, header::AUTHORIZATION},
+    http::{
+        HeaderMap, HeaderValue, Method, StatusCode,
+        header::{AUTHORIZATION, CONTENT_TYPE},
+    },
     routing::{get, post},
 };
 use hermes_control_core::{
-    ConfigError, HermesRuntimeController, ModelRuntimeController, OperationPlan, WslController,
-    collect_read_only_status, load_config_dir, tail_file_lines,
+    ConfigError, ConfigSet, HermesRuntimeController, ModelRuntimeController, OperationPlan,
+    WslController, collect_read_only_status, load_config_dir, tail_file_lines,
 };
 use hermes_control_types::{
     ActionRequest, ActiveRouteStatus, AiProviderKind, AuditEventSummary, CancelRequest,
-    CommandPreview, ConfirmRequest, ConfirmationLifecycleResponse, ControlConfig, HealthStatus,
-    HermesAction, ModelAction, ModelRuntimeSummary, OperationResponse, ProviderConfig,
-    ReadOnlyStatus, Requester, RequesterChannel, RiskLevel, RouteRollbackRequest,
-    RouteSwitchRequest, WslAction,
+    CommandPreview, ConfirmRequest, ConfirmationLifecycleResponse, HealthStatus, HermesAction,
+    ModelAction, ModelRuntimeSummary, OperationResponse, ProviderConfig, ReadOnlyStatus, Requester,
+    RequesterChannel, RiskLevel, RouteRollbackRequest, RouteSwitchRequest, WslAction,
 };
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
 use thiserror::Error;
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer},
+};
+use tracing::Level;
 
 #[derive(Debug, Error)]
 pub enum DaemonError {
@@ -254,7 +261,26 @@ pub fn build_router_with_executor(
         .route("/v1/hermes/action", post(hermes_action))
         .route("/v1/confirm", post(confirm_action))
         .route("/v1/cancel", post(cancel_action))
-        .with_state(state))
+        .with_state(state)
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
+                .on_request(DefaultOnRequest::new().level(Level::INFO))
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        )
+        .layer(local_gui_cors_layer()))
+}
+
+fn local_gui_cors_layer() -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list([
+            HeaderValue::from_static("http://localhost:5173"),
+            HeaderValue::from_static("http://localhost:5174"),
+            HeaderValue::from_static("http://127.0.0.1:5173"),
+            HeaderValue::from_static("http://127.0.0.1:5174"),
+        ]))
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([AUTHORIZATION, CONTENT_TYPE])
 }
 
 async fn status(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<ReadOnlyStatus> {
@@ -665,8 +691,8 @@ async fn log_tail(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
     let project_root = project_root_for_config_dir(&state.config_dir);
-    let paths = log_candidate_paths(&project_root, &config.control, &target)
-        .ok_or(StatusCode::NOT_FOUND)?;
+    let paths =
+        log_candidate_paths(&project_root, &config, &target).ok_or(StatusCode::NOT_FOUND)?;
 
     read_log_tail(&target, &paths, tail)
         .map(Json)
@@ -678,21 +704,30 @@ async fn log_tail(
 
 fn log_candidate_paths(
     project_root: &Path,
-    control: &ControlConfig,
+    config: &ConfigSet,
     target: &str,
 ) -> Option<Vec<PathBuf>> {
     match target.to_ascii_lowercase().as_str() {
         "daemon" => Some(vec![resolve_project_path(
             project_root,
-            &control.daemon.log_dir,
+            &config.control.daemon.log_dir,
         )]),
         "bot" => Some(vec![project_root.join("logs/bot")]),
         "hermes" => Some(
-            control
+            config
+                .control
                 .hermes
                 .logs
                 .iter()
                 .map(|path| resolve_project_path(project_root, path))
+                .collect(),
+        ),
+        "vllm" => Some(
+            config
+                .model_runtimes
+                .runtimes
+                .iter()
+                .map(|runtime| resolve_project_path(project_root, &runtime.log_dir))
                 .collect(),
         ),
         _ => None,
@@ -1117,6 +1152,7 @@ impl DaemonStateStore {
             );
             ",
         )?;
+        mark_stale_running_operations_failed(&state_connection, &audit_connection)?;
 
         Ok(Self {
             state_db: Arc::new(state_db),
@@ -1550,6 +1586,59 @@ fn ensure_state_column(
             [],
         )?;
     }
+    Ok(())
+}
+
+fn mark_stale_running_operations_failed(
+    state_connection: &Connection,
+    audit_connection: &Connection,
+) -> Result<(), DaemonError> {
+    let mut statement = state_connection.prepare(
+        "
+        SELECT id, action, requester_channel, requester_user_id
+        FROM operation_state
+        WHERE status = 'running'
+        ",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })?;
+    let stale_operations = rows.collect::<Result<Vec<_>, _>>()?;
+    if stale_operations.is_empty() {
+        return Ok(());
+    }
+
+    for (id, action, requester_channel, requester_user_id) in stale_operations {
+        state_connection.execute(
+            "
+            UPDATE operation_state
+            SET status = 'failed',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?1 AND status = 'running'
+            ",
+            [&id],
+        )?;
+        audit_connection.execute(
+            "
+            INSERT INTO audit_events (
+                requester_channel, requester_user_id, action, risk_level, summary
+            )
+            VALUES (?1, ?2, ?3, 'NormalMutating', ?4)
+            ",
+            (
+                &requester_channel,
+                &requester_user_id,
+                &action,
+                format!("Recovered stale running operation {id} after daemon restart."),
+            ),
+        )?;
+    }
+
     Ok(())
 }
 

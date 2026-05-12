@@ -5,6 +5,12 @@ This map explains where to work in the Hermes Control Rust workspace.
 ## Top Level
 
 - `AGENTS.md`: project operating guide for AI agents and contributors.
+- `start-hermes-control.ps1`: root Windows convenience launcher for the local
+  daemon and GUI. It writes PID files under `state/`, daemon stdout/stderr under
+  `logs/daemon/`, and GUI/Vite stdout/stderr under `logs/local-run/`.
+- `stop-hermes-control.ps1`: root Windows convenience stopper for the local
+  daemon and GUI. It only stops WSL, Hermes, or vLLM when explicit switches are
+  passed.
 - `plan_rust_control_rewrite.md`: rewrite plan, phase order, authority model,
   and Tauri boundary.
 - `Cargo.toml`: workspace members and shared dependency policy.
@@ -22,7 +28,9 @@ This map explains where to work in the Hermes Control Rust workspace.
 - `docs/`: handoff notes, boundary docs, and change log.
 - `vLLM/`: Hermes Control-owned vLLM runtime scaffold. Scripts are tracked;
   `.venv`, cache, logs, downloads, and accidental local models are ignored.
-  Default model weights live outside this directory at `E:\WSL\vLLM\models`.
+  Default model weights live inside the WSL2 rootfs at `/root/Hermres/models`
+  to avoid `/mnt/e` 9P checkpoint loading overhead. The old
+  `E:\WSL\vLLM\models` path is only a migration source or backup.
   vLLM socket/temp files default to WSL `/tmp` for DrvFS compatibility; pip
   cache may also fall back there when DrvFS ownership is incompatible with pip.
 
@@ -59,8 +67,8 @@ This map explains where to work in the Hermes Control Rust workspace.
 - `crates/hermes-control-daemon`
   - Axum daemon surface.
   - Authenticated read-only routes for status, health, providers, models,
-    individual model status, active route, non-model log tails, and audit
-    summaries.
+    individual model status, active route, daemon/bot/Hermes/vLLM log tails, and
+    audit summaries.
   - SQLite state/audit initialization for active route, operation state,
     confirmations, and audit events.
   - WSL/Hermes action routes for dry-run previews and destructive-action
@@ -93,6 +101,8 @@ This map explains where to work in the Hermes Control Rust workspace.
     through `OperationResponse.output`.
   - Hermes destructive operations and wake operations now reach the executor
     through fixed WSL script previews.
+  - HTTP request/response tracing is enabled at info level so the daemon log
+    target has visible runtime activity.
 
 - `scripts/wsl-root`
   - Product-owned WSL root helper package.
@@ -128,8 +138,10 @@ This map explains where to work in the Hermes Control Rust workspace.
   - `bootstrap.sh`: creates or repairs the project-owned Python venv and installs
     vLLM.
   - `serve-openai.sh`: shared OpenAI-compatible vLLM launcher.
-  - `start-qwen36-mtp.sh` and `start-qwen36-int4-eager.sh`: fixed variant entry
-    scripts consumed by WSL root helpers.
+  - `start-qwen36-mtp.sh`, `start-qwen36-mtp-tuned.sh`, and
+    `start-qwen36-int4-eager.sh`: fixed variant entry scripts consumed by WSL
+    root helpers. The tuned MTP script is experimental and does not replace the
+    default MTP startup path.
 
 - `crates/hermes-control-cli`
   - Clap command definitions and CLI rendering.
@@ -158,9 +170,12 @@ This map explains where to work in the Hermes Control Rust workspace.
 
 - `crates/hermes-control-gui`
   - GUI Rust boundary crate shared by the Tauri app.
-  - Provides `GuiConfig`, `GuiDaemonClient`, `GuiDashboardSnapshot`, GUI
-    requester helpers, route switch/rollback dry-run request builders, safe log
-    tail target helpers, and the Tauri capability contract.
+  - Provides `GuiConfig`, redacted `GuiConnectionSummary`, `GuiDaemonClient`,
+    `GuiDashboardSnapshot`, GUI requester helpers, route switch/rollback
+    preview and execute request builders, model action preview and execute
+    request builders, daemon confirm/cancel request builders, WSL/Hermes
+    runtime action preview and execute request builders, safe log tail target
+    helpers, and the Tauri capability contract.
   - Must stay a daemon client; no raw WSL/Hermes/vLLM process control belongs
     here.
 
@@ -171,9 +186,26 @@ This map explains where to work in the Hermes Control Rust workspace.
     add `shell:`, `fs:`, or process permissions without a new security review.
   - Current front end is an operations dashboard with Dashboard, AI Route, Local
     Models, Runtime, Logs, Audit, and Settings surfaces.
-  - Route and Logs surfaces currently support daemon dry-run previews and
-    daemon-owned log tailing; confirmation/execution controls remain a later
-    increment.
+  - Route and Logs surfaces currently support daemon dry-run previews,
+    switch/rollback execution, daemon confirmation confirm/cancel, and
+    daemon-owned log tailing.
+  - Local Models supports selected model/action preview and run controls for
+    install/start/stop/restart/health/logs/benchmark.
+  - Local Models reads `model_root` from daemon model summaries and displays
+    the active WSL-native model directory; the GUI must not hard-code model
+    storage paths.
+  - Runtime supports WSL and Hermes action preview/run controls through daemon
+    APIs and the shared confirmation sheet.
+  - Logs supports daemon-owned target selection, bounded tail size, and
+    client-side loaded-line filtering.
+  - Audit supports client-side risk/requester/query filtering over the daemon
+    audit summary.
+  - Settings supports browser-preview daemon URL/token/operator localStorage,
+    Tauri desktop environment summaries, redacted token status, and daemon
+    connection testing.
+  - `src/lib/i18n.ts` provides the Chinese-first translation dictionary,
+    language normalization, and English fallback option. UI labels are
+    localized, but typed daemon action IDs remain unchanged.
 
 - `crates/hermes-control-testkit`
   - Shared test helpers and fixtures.
@@ -191,9 +223,11 @@ This map explains where to work in the Hermes Control Rust workspace.
 - `crates/hermes-control-core/tests/phase5_vllm_project_runtime_assets.rs`:
   project-owned vLLM runtime path, script assets, and external model-store
   contract, plus WSL-primary-IP endpoint resolution and vLLM health response
-  parsing.
+  parsing. It also locks the WSL health-helper endpoint override contract so
+  daemon-selected model endpoints survive `/etc/hermes-control/runtime.env`.
 - `crates/hermes-control-core/tests/read_only_core.rs`: WSL parser, vLLM model
-  parsing, log tailing, and status behavior.
+  parsing, WSL helper health command construction, log tailing, and status
+  behavior.
 - `crates/hermes-control-cli/tests/help_contract.rs`: CLI help contract.
 - `crates/hermes-control-cli/tests/read_only_commands.rs`: read-only CLI
   rendering behavior.
@@ -204,13 +238,21 @@ This map explains where to work in the Hermes Control Rust workspace.
   logs, runtime config parsing, and no raw subprocess boundary.
 - `crates/hermes-control-gui/tests/phase8_gui_boundary.rs`: GUI daemon-client
   config, GUI requester shape, Tauri capability safety, and no raw
-  shell/filesystem/process boundary, plus route rollback preview and safe log
-  target contracts.
+  shell/filesystem/process boundary, plus route switch/rollback execution,
+  model action execution, WSL/Hermes runtime action execution, confirmation
+  lifecycle, safe log target contracts including `vllm`, and redacted
+  connection summary behavior.
 - `apps/hermes-control-gui/src/lib/viewModel.test.ts`: front-end dashboard view
   model, route option flags, log target bounds, control-surface navigation, and
-  unsafe Tauri permission prefix documentation.
+  daemon confirmation prompt rendering, plus Local Models and Runtime action
+  options, Settings connection summary rendering, log filtering, and audit
+  filtering.
+- `apps/hermes-control-gui/src/lib/i18n.test.ts`: Chinese default language,
+  English language option, language normalization, and localized action option
+  rendering without changing typed action IDs.
 - `crates/hermes-control-daemon/tests/phase3_api.rs`: daemon bearer auth,
-  SQLite initialization, read-only API route behavior, and daemon log tailing.
+  local GUI CORS preflight, SQLite initialization, read-only API route behavior,
+  and daemon log tailing.
 - `crates/hermes-control-core/tests/phase4_operation_plans.rs`: WSL/Hermes typed
   operation planning, fixed WSL command previews, and Hermes script preview
   behavior.

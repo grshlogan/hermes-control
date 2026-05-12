@@ -4,6 +4,72 @@ This document records landed structural changes after each working
 conversation. Keep entries short, factual, and ordered by time. Do not record
 unimplemented ideas here.
 
+## 2026-05-12: Add qwen36 MTP tuned vLLM profile
+
+- Added an isolated `qwen36-mtp-tuned` vLLM variant and
+  `vLLM/scripts/start-qwen36-mtp-tuned.sh` as an experimental launch profile.
+- Kept the default `qwen36-mtp` startup path unchanged.
+- Tuned profile borrows low-risk runtime flags only: spawn workers, conservative
+  NCCL settings, prefix caching, and chunked prefill, while retaining TP=2,
+  90000 max context, and 0.90 GPU memory utilization defaults.
+- Updated WSL root helper install/runtime mappings so daemon model actions can
+  start and stop the tuned variant through the product-owned helper boundary.
+
+## 2026-05-10: Clear stale daemon operation locks on restart
+
+- Fixed a stale operation-lock bug where a daemon restart during a long-running
+  model start could leave `operation_state.status = running` forever, causing
+  GUI/Web model Stop requests to return HTTP 409.
+- Daemon startup now marks inherited `running` operations as `failed` and writes
+  an audit recovery record, while keeping pending confirmations locked until an
+  operator confirms or cancels them.
+- Improved GUI/Web 409 messages for model/runtime operations so operators see
+  that a pending or running operation must be confirmed, cancelled, or retried.
+
+## 2026-05-10: Move qwen36 weights into WSL2 native storage
+
+- Copied `Qwen3.6-27B-AWQ-INT4` from the old Windows-backed
+  `E:\WSL\vLLM\models` store into `/root/Hermres/models` inside
+  `Ubuntu-Hermes-Codex`.
+- Changed vLLM runtime defaults and WSL root helper install defaults to use
+  `/root/Hermres/models` as `VLLM_MODEL_ROOT`.
+- Added `model_root` to the daemon model-runtime summary and Local Models GUI
+  cards so operators can see the active WSL-native model directory from the UI.
+- Preserved the old Windows-backed model store as a migration source/backup;
+  no model weights were deleted.
+- Updated Phase 5 asset tests to lock the WSL2-native model root contract.
+
+## 2026-05-07: Phase 8 local vLLM route readiness gate fixed
+
+- Fixed the local-vLLM route switch gate so daemon readiness checks can use the
+  WSL root helper when Windows cannot reach the vLLM WSL IP directly.
+- Added a daemon-provided vLLM models endpoint override for the WSL health
+  helper, and made `hermes-control-common.sh` preserve that override after
+  sourcing `/etc/hermes-control/runtime.env`.
+- Refreshed the installed WSL helpers under `/opt/hermes-control/bin`.
+- Verified live `qwen36-mtp` readiness through `GET /v1/models` and confirmed
+  `POST /v1/route/switch` completed for `local.vllm.qwen36-mtp`.
+- Added regression tests proving bad local endpoints are still rejected and
+  cannot accidentally borrow the machine's currently running vLLM instance.
+
+## 2026-05-07: Root start and stop scripts
+
+- Added `start-hermes-control.ps1` at the project root to start the Windows
+  daemon and Web/Tauri GUI with local PID files and logs.
+- Added `stop-hermes-control.ps1` at the project root to stop only the local
+  hermes-control daemon/GUI by default, with explicit switches for vLLM, Hermes,
+  or full WSL shutdown.
+- Documented the root scripts in `README.md` and `docs/APP_CODE_MAP.md`.
+
+## 2026-05-07: Phase 8 model startup feedback clarified
+
+- Reproduced the Local Models `Start qwen36-mtp` path while vLLM/MTP was
+  actually loading in WSL.
+- Replaced the terse `Submitting start` status with a localized long-running
+  startup message that names the model and explains that vLLM/MTP loading can
+  take several minutes.
+- Added a view-model regression test for Start/Restart progress copy.
+
 ## 2026-05-02: Host Rust toolchain prepared
 
 - Installed the Windows Rust build environment on this machine.
@@ -422,3 +488,108 @@ unimplemented ideas here.
 - Added `src-tauri/capabilities/default.json` with only `core:default`, plus
   tests proving no broad `shell:`, `fs:`, or process authority is exposed.
 - Added front-end view-model tests and Rust Phase8 GUI boundary tests.
+
+## 2026-05-06: Phase 8 GUI authority tier clarified
+
+- Updated the plan to define GUI as the highest client authority surface because
+  it runs locally on the Windows desktop.
+- Clarified asymmetric parity: GUI should cover normal bot operations and more
+  local-only controls, while Telegram remains the narrower remote-control
+  surface.
+- Reaffirmed that higher GUI permission still means typed daemon APIs,
+  confirmation, requester identity, and audit, not raw shell/filesystem/process
+  access.
+
+## 2026-05-06: Phase 8 route execution and confirmation bridge
+
+- Added GUI daemon-client methods and Tauri commands for route switch execution,
+  route rollback execution, daemon confirmation, and daemon cancellation.
+- Added controlled Switch/Rollback buttons to the Route surface; daemon
+  `confirmation_required` responses now render a confirmation sheet with
+  confirm/cancel actions.
+- Kept Tauri capabilities at `core:default`; the new GUI authority is expressed
+  only as additional typed daemon verbs.
+- Added Rust and TypeScript tests for GUI requester shape, execution command
+  coverage, confirmation lifecycle requests, and confirmation prompt rendering.
+
+## 2026-05-06: Phase 8 Local Models action controls
+
+- Added GUI daemon-client methods and Tauri commands for model action preview
+  and execution through `POST /v1/models/{model_id}/action`.
+- Wired the Local Models surface with selected model/action controls for
+  install, start, stop, restart, health, logs, and benchmark.
+- Reused the daemon confirmation sheet for destructive or experimental model
+  operations while keeping Tauri capabilities at `core:default`.
+- Added Rust and TypeScript tests for model action requester shape, GUI command
+  coverage, and model action option rendering.
+
+## 2026-05-07: Phase 8 Runtime action controls
+
+- Added GUI daemon-client methods and Tauri commands for WSL and Hermes runtime
+  action preview/execution.
+- Wired the Runtime surface with WSL wake/stop/restart/shutdown and Hermes
+  wake/stop/restart/kill controls.
+- Reused the daemon confirmation sheet for destructive runtime operations while
+  keeping Tauri capabilities at `core:default`.
+- Added Rust and TypeScript tests for runtime action requester shape, GUI
+  command coverage, and runtime action option rendering.
+
+## 2026-05-07: Phase 8 Settings, Logs, and Audit controls
+
+- Added redacted GUI connection summaries for Tauri desktop mode so Settings can
+  show daemon URL, operator ID, and token configured state without exposing the
+  raw token to the renderer.
+- Wired browser-preview Settings controls for daemon URL, API token, and
+  operator ID through localStorage, plus a daemon connection test.
+- Added bounded log tail size selection and client-side loaded-line filtering to
+  the Logs surface.
+- Added Audit filters for risk, requester, and query over daemon-provided audit
+  summaries.
+- Kept Tauri capabilities at `core:default`; these controls remain typed daemon
+  client flows or local renderer-only filtering.
+
+## 2026-05-07: Phase 8 Chinese-first GUI i18n
+
+- Added `src/lib/i18n.ts` with Simplified Chinese as the default GUI language
+  and English as an explicit Settings option.
+- Added Settings language selection stored locally in the renderer.
+- Localized the main navigation, dashboard, Settings, route/model/runtime/log
+  and audit controls, confirmation UI, and common action/risk labels.
+- Kept daemon-facing action IDs and typed request payloads unchanged; i18n only
+  affects operator-facing labels.
+- Added tests for default language, language normalization, English fallback
+  option, localized action labels, and risk label translation.
+
+## 2026-05-07: Phase 8 browser preview daemon CORS fixed
+
+- Reproduced the browser-preview `Failed to fetch` path as a daemon CORS
+  preflight failure: `OPTIONS /v1/status` from `http://localhost:5174` returned
+  HTTP 405 before the fix.
+- Added a local GUI CORS layer to the daemon for `localhost` and `127.0.0.1`
+  Vite origins on ports `5173` and `5174`.
+- Kept daemon bearer auth unchanged; successful browser requests still require
+  the GUI API token to match `HERMES_CONTROL_API_TOKEN`.
+- Added a daemon Phase 3 regression test covering the local GUI preflight
+  headers.
+
+## 2026-05-07: Phase 8 dashboard Hermes status card
+
+- Replaced the top status strip's standalone State DB card with a Hermes status
+  card so operators can see Hermes reachability without opening Runtime.
+- Combined state DB and audit DB visibility into one Dashboard detail row.
+- Added a front-end view-model test for the combined local state-store summary.
+
+## 2026-05-07: Phase 8 runtime readiness and log output repair
+
+- Fixed local vLLM readiness checks to fall back from configured Windows
+  loopback endpoints to the current WSL primary IP when vLLM is only reachable
+  inside WSL.
+- Added daemon `/v1/logs/vllm` support using configured model runtime log
+  directories, and exposed `vllm` in both browser GUI and Tauri GUI safe log
+  target lists.
+- Updated the root start script so daemon stdout/stderr is written under
+  `logs/daemon`, the same target read by the GUI Logs page.
+- Added info-level HTTP request/response tracing to the daemon so the daemon log
+  target has visible runtime activity instead of an always-empty file.
+- Verified the live daemon at `http://127.0.0.1:18787` returned vLLM log lines
+  from `vLLM\logs` while the model itself remained stopped.

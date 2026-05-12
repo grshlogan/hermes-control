@@ -14,7 +14,7 @@ if [[ "$(id -u)" != "0" ]]; then
 fi
 
 PROJECT_VLLM_WORKSPACE="/mnt/e/WSL/Hermres/hermes-control/vLLM"
-EXTERNAL_VLLM_MODEL_ROOT="/mnt/e/WSL/vLLM/models"
+WSL_NATIVE_VLLM_MODEL_ROOT="/root/Hermres/models"
 
 missing=()
 for command_name in curl python3 paste install sed; do
@@ -39,7 +39,7 @@ install -d -m 0755 "${PROJECT_VLLM_WORKSPACE}/logs"
 install -d -m 0755 "${PROJECT_VLLM_WORKSPACE}/cache"
 install -d -m 0755 "${PROJECT_VLLM_WORKSPACE}/downloads"
 install -d -m 0755 "${PROJECT_VLLM_WORKSPACE}/tmp"
-install -d -m 0755 "${EXTERNAL_VLLM_MODEL_ROOT}"
+install -d -m 0755 "${WSL_NATIVE_VLLM_MODEL_ROOT}"
 
 for script in "${SCRIPT_DIR}/bin/"*.sh; do
   install -m 0755 "$script" "${INSTALL_PREFIX}/bin/$(basename "$script")"
@@ -71,13 +71,14 @@ OPENWEBUI_HERMES_BASE_URL=http://127.0.0.1:8642/v1
 OPENWEBUI_DEFAULT_MODEL=hermes-agent
 OPENWEBUI_OPENAI_API_KEY_ENV=API_SERVER_KEY
 VLLM_WORKSPACE=/mnt/e/WSL/Hermres/hermes-control/vLLM
-VLLM_MODEL_ROOT=/mnt/e/WSL/vLLM/models
+VLLM_MODEL_ROOT=/root/Hermres/models
 VLLM_PORT=18080
 VLLM_CLIENT_HOST=auto
 VLLM_MODELS_ENDPOINT=auto
 VLLM_LOG_DIR=/mnt/e/WSL/Hermres/hermes-control/vLLM/logs
 VLLM_PID_DIR=/run/hermes-control
 VLLM_START_QWEN36_MTP=/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/start-qwen36-mtp.sh
+VLLM_START_QWEN36_MTP_TUNED=/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/start-qwen36-mtp-tuned.sh
 VLLM_START_QWEN36_AWQ_INT4=/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/start-qwen36-int4-eager.sh
 VLLM_BOOTSTRAP_SCRIPT=/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/bootstrap.sh
 ENV
@@ -110,13 +111,14 @@ set_runtime_env "OPENWEBUI_PID_FILE" "/run/hermes-control/open-webui.pid"
 set_runtime_env "OPENWEBUI_HERMES_BASE_URL" "http://127.0.0.1:8642/v1"
 set_runtime_env "OPENWEBUI_DEFAULT_MODEL" "hermes-agent"
 set_runtime_env "OPENWEBUI_OPENAI_API_KEY_ENV" "API_SERVER_KEY"
-set_runtime_env "VLLM_MODEL_ROOT" "$EXTERNAL_VLLM_MODEL_ROOT"
+set_runtime_env "VLLM_MODEL_ROOT" "$WSL_NATIVE_VLLM_MODEL_ROOT"
 set_runtime_env "VLLM_PORT" "18080"
 set_runtime_env "VLLM_CLIENT_HOST" "auto"
 set_runtime_env "VLLM_MODELS_ENDPOINT" "auto"
 set_runtime_env "VLLM_LOG_DIR" "${PROJECT_VLLM_WORKSPACE}/logs"
 set_runtime_env "VLLM_PID_DIR" "/run/hermes-control"
 set_runtime_env "VLLM_START_QWEN36_MTP" "${PROJECT_VLLM_WORKSPACE}/scripts/start-qwen36-mtp.sh"
+set_runtime_env "VLLM_START_QWEN36_MTP_TUNED" "${PROJECT_VLLM_WORKSPACE}/scripts/start-qwen36-mtp-tuned.sh"
 set_runtime_env "VLLM_START_QWEN36_AWQ_INT4" "${PROJECT_VLLM_WORKSPACE}/scripts/start-qwen36-int4-eager.sh"
 set_runtime_env "VLLM_BOOTSTRAP_SCRIPT" "${PROJECT_VLLM_WORKSPACE}/scripts/bootstrap.sh"
 

@@ -297,6 +297,49 @@ async fn pending_confirmation_locks_second_mutating_action_until_confirmed() {
 }
 
 #[tokio::test]
+async fn stale_running_operation_is_marked_failed_on_router_startup() {
+    let fixture = Fixture::new();
+    let executor = Arc::new(RecordingExecutor::default());
+    let router = build_router_with_executor(&fixture.config_dir, TOKEN, executor.clone())
+        .expect("router should build");
+
+    let started = post_json(
+        router,
+        "/v1/models/qwen36-mtp/action",
+        json!({
+            "requester": {"channel": "gui", "user_id": "phase8-test"},
+            "action": "Start",
+            "reason": "phase8 stale running lock setup",
+            "dry_run": false
+        }),
+    )
+    .await;
+    assert_eq!(started["status"], "completed");
+
+    mark_latest_operation_running(&fixture.state_db);
+
+    let restarted_router = build_router_with_executor(&fixture.config_dir, TOKEN, executor)
+        .expect("router should rebuild");
+    let stop = post_json(
+        restarted_router,
+        "/v1/models/qwen36-mtp/action",
+        json!({
+            "requester": {"channel": "gui", "user_id": "phase8-test"},
+            "action": "Stop",
+            "reason": "phase8 stop after stale running lock",
+            "dry_run": false
+        }),
+    )
+    .await;
+
+    assert_eq!(stop["status"], "confirmation_required");
+    assert_eq!(
+        operation_statuses(&fixture.state_db),
+        vec!["failed".to_owned(), "pending_confirmation".to_owned()]
+    );
+}
+
+#[tokio::test]
 async fn cancel_marks_pending_confirmation_cancelled_and_releases_lock() {
     let fixture = Fixture::new();
     let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
@@ -860,6 +903,25 @@ fn operation_statuses(path: &Path) -> Vec<String> {
         .expect("status query should run")
         .map(|row| row.expect("status should read"))
         .collect()
+}
+
+fn mark_latest_operation_running(path: &Path) {
+    let connection = Connection::open(path).expect("database should open");
+    connection
+        .execute(
+            "
+            UPDATE operation_state
+            SET status = 'running'
+            WHERE id = (
+                SELECT id
+                FROM operation_state
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+            )
+            ",
+            [],
+        )
+        .expect("operation should be marked running");
 }
 
 struct Fixture {

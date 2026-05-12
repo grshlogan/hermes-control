@@ -139,6 +139,12 @@ h2 {
   line-height: 1.25;
 }
 
+h3 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
 .icon-button {
   display: inline-grid;
   place-items: center;
@@ -252,6 +258,7 @@ h2 {
 
 .action-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: end;
   gap: 10px;
   margin-bottom: 14px;
@@ -270,7 +277,12 @@ h2 {
 }
 
 .action-row select,
-.action-row button {
+.action-row input,
+.action-row button,
+.button-group button,
+.confirm-code input,
+.settings-grid select,
+.settings-grid input {
   min-height: 38px;
   border: 1px solid rgba(27, 33, 31, 0.16);
   border-radius: 6px;
@@ -282,14 +294,85 @@ h2 {
   color: #1b211f;
 }
 
-.action-row button {
+.action-row input {
+  min-width: 0;
+  padding: 0 10px;
+  color: #1b211f;
+}
+
+.compact-label {
+  min-width: 112px !important;
+}
+
+.settings-layout {
+  display: grid;
+  gap: 18px;
+}
+
+.settings-form {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settings-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-grid label span {
+  color: #66736d;
+  font-size: 13px;
+}
+
+.settings-grid input,
+.settings-grid select {
+  width: 100%;
+  padding: 0 10px;
+  color: #1b211f;
+}
+
+.settings-grid input:disabled,
+.settings-grid select:disabled {
+  color: #66736d;
+  background: rgba(250, 249, 244, 0.72);
+}
+
+.wide-field {
+  grid-column: 1 / -1;
+}
+
+.action-row button,
+.button-group button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   padding: 0 12px;
   color: #12323b;
   cursor: pointer;
 }
 
-.action-row button:hover {
+.action-row button:hover,
+.button-group button:hover {
   background: rgba(36, 95, 111, 0.08);
+}
+
+.action-row button:disabled,
+.button-group button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.danger-button {
+  color: #7a2e22 !important;
+  border-color: rgba(177, 79, 54, 0.26) !important;
+  background: rgba(177, 79, 54, 0.08) !important;
 }
 
 .inline-status {
@@ -329,6 +412,42 @@ h2 {
 
 .model-row {
   grid-template-columns: auto minmax(180px, 0.34fr) minmax(0, 1fr);
+  width: 100%;
+  color: inherit;
+  border-top: 0;
+  border-right: 0;
+  border-left: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background-color 160ms ease,
+    padding-left 160ms ease;
+}
+
+.model-row:hover,
+.model-row.selected {
+  padding-left: 10px;
+  background: rgba(36, 95, 111, 0.08);
+}
+
+.runtime-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.runtime-action-group {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(27, 33, 31, 0.12);
+  border-radius: 8px;
+  background: rgba(250, 249, 244, 0.66);
+}
+
+.runtime-action-group h3 {
+  margin-bottom: 12px;
 }
 
 .model-row div,
@@ -351,6 +470,13 @@ h2 {
 
 .audit-row {
   grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.audit-row small {
+  display: block;
+  margin-top: 3px;
+  color: #7b8781;
+  font-size: 12px;
 }
 
 .dot {
@@ -381,6 +507,40 @@ h2 {
   margin-top: 18px;
   padding-top: 18px;
   border-top: 1px solid rgba(27, 33, 31, 0.12);
+}
+
+.confirmation-sheet {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid rgba(177, 79, 54, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 248, 242, 0.88);
+}
+
+.confirm-code {
+  display: grid;
+  gap: 6px;
+  max-width: 360px;
+  margin-top: 14px;
+}
+
+.confirm-code span {
+  color: #66736d;
+  font-size: 13px;
+}
+
+.confirm-code input {
+  width: 100%;
+  padding: 0 10px;
+  color: #1b211f;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+.button-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
 }
 
 .command-preview {
@@ -432,7 +592,9 @@ h2 {
   }
 
   .status-strip,
-  .main-grid {
+  .main-grid,
+  .settings-grid,
+  .runtime-actions {
     grid-template-columns: 1fr;
   }
 }
@@ -448,7 +610,8 @@ h2 {
 
   .topbar,
   .panel-header,
-  .action-row {
+  .action-row,
+  .button-group {
     align-items: start;
     flex-direction: column;
   }

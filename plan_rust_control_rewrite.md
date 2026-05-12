@@ -18,8 +18,9 @@ Current vLLM runtime posture:
   `/mnt/e/WSL/Hermres/hermes-control/vLLM`
 - Project-owned vLLM venv:
   `E:\WSL\Hermres\hermes-control\vLLM\.venv`
-- Model-weight directory: `E:\WSL\vLLM\models`
-- Important boundary: `E:\WSL\vLLM\models` is only the reusable model store.
+- Model-weight directory: `/root/Hermres/models` inside WSL2.
+- Important boundary: `E:\WSL\vLLM\models` is only an old reusable model store
+  or migration source.
   The old `E:\WSL\vLLM` workspace must not be treated as the software-owned
   vLLM runtime environment.
 - log/cache directories belong under
@@ -38,8 +39,8 @@ Current v1 plan direction:
 - Telegram bot, Windows GUI, and CLI call the same Rust control daemon.
 - Bot/GUI must not directly execute arbitrary shell.
 - vLLM should become a managed local model runtime under the project-owned
-  `hermes-control\vLLM` boundary, while model weights remain in the external
-  `E:\WSL\vLLM\models` store.
+  `hermes-control\vLLM` boundary, while model weights default to the WSL2-native
+  `/root/Hermres/models` store for faster checkpoint loading.
 - Hermes process control is a WSL root boundary. New code must call
   product-owned helpers installed under `/opt/hermes-control/bin`, not inherited
   `.sh` files under `/root/Hermres`.
@@ -88,6 +89,9 @@ Explicit product boundary:
   backend is started, checked, selected, stopped, and exposed to Hermes.
 - CLI, bot, and GUI are client surfaces for this daemon and must not become
   separate model/process authorities.
+- GUI is the highest client authority surface because it runs locally on the
+  Windows desktop. Telegram bot is a remote-control surface and should remain
+  narrower by default.
 
 ---
 
@@ -116,6 +120,9 @@ If forced to choose a single visible product direction, choose **advanced beauti
 1. **One source of truth**
    - Only `hermes-control-daemon` mutates state.
    - CLI, Telegram bot, and GUI call daemon APIs.
+   - GUI may expose more daemon operations than the Telegram bot, but that
+     higher local operator authority must still pass through typed daemon APIs,
+     confirmations, audit records, and requester identity.
 
 2. **No arbitrary shell**
     - There is no endpoint like `run_command` or `exec`.
@@ -809,6 +816,14 @@ Authority boundary:
 - Tauri Rust commands must not call `wsl.exe`, PowerShell, shell scripts, or arbitrary process APIs directly.
 - The frontend receives redacted DTOs and confirmation prompts; it must not receive raw secrets.
 - Tauri permissions/capabilities should allow only the narrow commands needed by the GUI window/tray.
+- GUI is intentionally a higher-permission client surface than the Telegram bot:
+  it may expose the full normal local-operator control set for Hermes, WSL,
+  vLLM, route switching, secrets refs, service install, and diagnostics.
+- Bot parity is asymmetric. The GUI should be able to cover every normal bot
+  operation, but the bot does not need to cover every GUI operation.
+- Higher GUI permission never means raw shell/filesystem/process permission.
+  It means more typed daemon verbs, stronger confirmation UX, local operator
+  identity, and clearer audit context.
 
 ### 13.2 eframe/egui Role
 
@@ -918,6 +933,27 @@ Required input: type HERMES-7421
 ```
 
 Use countdown expiration and show exact typed action, not vague “Are you sure?”.
+
+### 13.6 GUI/Bot Capability Parity
+
+GUI authority is intentionally higher than bot authority.
+
+| Capability | GUI target | Bot target |
+| --- | --- | --- |
+| Status, health, providers, models | Full | Full |
+| Daemon/bot/Hermes logs | Full | Full |
+| Model logs | Full | Full |
+| Route preview | Full | Full |
+| Route switch / rollback | Full local operator flow | Narrow remote flow |
+| Confirmation confirm/cancel | Full sheet with code, expiry, and audit context | Relay daemon code only |
+| vLLM install/start/stop/restart/health/benchmark | Full local operator flow | Limited or emergency-only |
+| WSL wake/stop/restart/shutdown | Full local operator flow | Limited or emergency-only |
+| Hermes wake/stop/restart/kill | Full local operator flow | Limited or emergency-only |
+| Secrets refs, service install, token rotation | GUI only | Not exposed |
+
+Implementation rule: GUI should eventually cover every normal bot operation.
+Bot does not need to mirror every GUI operation. Both remain daemon clients and
+never own raw system authority.
 
 ---
 
@@ -1212,9 +1248,16 @@ Completion signal:
 
 ### Phase 8 — Premium GUI
 
-Status: started. First increment has a Tauri v2 app scaffold, a React/TypeScript
-operations dashboard, a Rust daemon-client GUI boundary, and narrow Tauri
-capability tests.
+Status: in progress. The GUI now has a Tauri v2 app scaffold, a
+React/TypeScript operations dashboard, a Rust daemon-client GUI boundary,
+narrow Tauri capability tests, route switch/rollback execution commands, Local
+Models operation commands, WSL/Hermes runtime operation commands, and a daemon
+confirmation/cancel bridge. Settings now exposes local daemon connection
+guidance, browser-preview connection persistence, Tauri environment summaries,
+redacted token status without returning raw secrets to the renderer, and a
+Chinese-first i18n layer with an explicit language switch. Logs now cover
+daemon, bot, Hermes, and vLLM targets, and local vLLM readiness checks can fall
+back to the WSL primary IP when Windows loopback is not usable.
 
 Goal:
 
@@ -1231,9 +1274,24 @@ Codex tasks:
   utility-console surface.
 - Implement Dashboard, AI Route, Local Models, WSL, Hermes Runtime, Logs, Audit,
   Settings. Started as first-screen surfaces. Route dry-run preview, rollback
-  dry-run preview, and daemon/bot/hermes log target tailing are now wired;
-  confirmation-gated mutating controls remain later.
-- Implement confirmation sheet.
+  dry-run preview, route switch execution, route rollback execution,
+  Local Models install/start/stop/restart/health/logs/benchmark preview/run,
+  WSL wake/stop/restart/shutdown preview/run, Hermes wake/stop/restart/kill
+  preview/run,
+  daemon/bot/hermes/vLLM log target tailing, and confirmation prompt rendering are
+  now wired.
+- Expand observability controls. Started with bounded log tail size selection,
+  client-side loaded-line filtering, and audit filtering by risk, requester, and
+  query.
+- Expand Settings. Started with browser-preview daemon URL/token/operator
+  persistence in localStorage, Tauri desktop environment-variable summary, token
+  redaction, daemon connection test, and Chinese/English language selection.
+- Add i18n/localization. Started with Simplified Chinese as the default GUI
+  language, English as an explicit option, and localized navigation, dashboard,
+  Settings, route/model/runtime/log/audit controls, confirmation UI, and common
+  risk/action labels while preserving typed daemon action IDs.
+- Implement confirmation sheet. Started for daemon `confirmation_required`
+  responses with confirm/cancel calls through the GUI bridge.
 - Implement tray icon.
 - Implement theme switching.
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 DEFAULT_VLLM_WORKSPACE="/mnt/e/WSL/Hermres/hermes-control/vLLM"
-DEFAULT_VLLM_MODEL_ROOT="/mnt/e/WSL/vLLM/models"
+DEFAULT_VLLM_MODEL_ROOT="/root/Hermres/models"
 
 export VLLM_WORKSPACE="${VLLM_WORKSPACE:-$DEFAULT_VLLM_WORKSPACE}"
 export VLLM_MODEL_ROOT="${VLLM_MODEL_ROOT:-$DEFAULT_VLLM_MODEL_ROOT}"
