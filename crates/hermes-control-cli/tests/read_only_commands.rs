@@ -17,6 +17,7 @@ fn sample_status() -> ReadOnlyStatus {
             runtime_id: "vllm-local".to_owned(),
             variant_id: "qwen36-mtp".to_owned(),
             served_model_name: "qwen36-mtp".to_owned(),
+            model_root: Some("/root/Hermres/models".to_owned()),
             endpoint: EndpointStatus::ok("http://127.0.0.1:18080/v1/models", 200),
             ready: true,
         }],
@@ -48,19 +49,32 @@ fn renders_status_json_for_machine_use() {
 #[test]
 fn renders_providers_without_secret_values() {
     let providers = vec![ProviderConfig {
-        id: "external.openai-compatible".to_owned(),
-        kind: hermes_control_types::AiProviderKind::OpenAiCompatible,
-        display_name: "External API".to_owned(),
-        base_url: Some("https://example.com/v1".to_owned()),
-        api_key_ref: Some("hermes/provider/external-openai-compatible".to_owned()),
-        models: vec!["coder".to_owned()],
+        id: "external.api-relay".to_owned(),
+        kind: hermes_control_types::AiProviderKind::AnthropicClaude,
+        display_name: "API Relay".to_owned(),
+        base_url: Some("https://api-relay.example.com/".to_owned()),
+        api_key_ref: Some("hermes/provider/api-relay".to_owned()),
+        models: vec!["claude-sonnet-4-6".to_owned()],
+        default_account_id: Some("main".to_owned()),
+        default_model: Some("claude-sonnet-4-6".to_owned()),
+        anthropic_defaults: None,
+        runtime_env: std::collections::BTreeMap::new(),
+        accounts: vec![hermes_control_types::ProviderAccountConfig {
+            id: "main".to_owned(),
+            display_name: "Main relay token".to_owned(),
+            secret_ref: "env:ANTHROPIC_AUTH_TOKEN".to_owned(),
+            secret_env_key: "ANTHROPIC_AUTH_TOKEN".to_owned(),
+            secret_source: hermes_control_types::ProviderSecretSource::Env,
+            enabled: true,
+            priority: 10,
+        }],
         model_runtime: None,
         served_model_name: None,
     }];
 
     let rendered = render_providers(&providers, CliOutputFormat::Text).expect("render providers");
 
-    assert!(rendered.contains("external.openai-compatible"));
+    assert!(rendered.contains("external.api-relay"));
     assert!(rendered.contains("secret_ref"));
     assert!(!rendered.contains("api_key ="));
 }

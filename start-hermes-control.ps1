@@ -60,6 +60,14 @@ function Stop-PortOwner([int]$Port, [string[]]$AllowedNames) {
     }
 }
 
+function Stop-NamedProcess([string]$ProcessName) {
+    $processes = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue
+    foreach ($process in $processes) {
+        Write-Host "Stopping $($process.ProcessName) PID $($process.Id)"
+        Stop-Process -Id $process.Id -Force
+    }
+}
+
 function Wait-HttpOk([string]$Url, [hashtable]$Headers, [int]$TimeoutSeconds) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
@@ -84,6 +92,8 @@ Ensure-Directory $DaemonLogDir
 if ($Force) {
     Stop-ExistingManagedProcess $DaemonPidFile "daemon"
     Stop-ExistingManagedProcess $GuiPidFile "GUI"
+    Stop-NamedProcess "hermes-control-gui-tauri"
+    Stop-PortOwner 5173 @("node")
     Stop-PortOwner 18787 @("hermes-control-daemon")
     Stop-PortOwner $GuiPort @("node")
 }

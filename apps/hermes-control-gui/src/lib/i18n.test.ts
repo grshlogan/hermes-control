@@ -8,6 +8,7 @@ import {
 import {
   buildHermesActionOptions,
   buildModelActionOptions,
+  buildOpenWebUiActionOptions,
   buildWslActionOptions,
 } from './viewModel';
 
@@ -15,6 +16,7 @@ describe('Phase8 GUI i18n', () => {
   it('defaults the GUI language to Simplified Chinese', () => {
     expect(DEFAULT_LANGUAGE).toBe('zh-CN');
     expect(createTranslator(DEFAULT_LANGUAGE)('nav.settings')).toBe('设置');
+    expect(createTranslator(DEFAULT_LANGUAGE)('nav.info')).toBe('信息');
     expect(createTranslator(DEFAULT_LANGUAGE)('topbar.title')).toBe('运维控制台');
   });
 
@@ -49,6 +51,11 @@ describe('Phase8 GUI i18n', () => {
       id: 'Kill',
       label: '强杀',
       riskHint: '破坏性',
+    });
+    expect(buildOpenWebUiActionOptions(t)[3]).toEqual({
+      id: 'Status',
+      label: '状态',
+      riskHint: '只读',
     });
   });
 });

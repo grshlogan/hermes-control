@@ -25,6 +25,7 @@ fn wsl_root_install_assets_define_canonical_helper_contract() {
         "hermes-control-openwebui-status.sh",
         "hermes-control-openwebui-sync.sh",
         "hermes-control-openwebui-refresh.sh",
+        "hermes-control-openwebui-stop.sh",
         "hermes-control-vllm-start.sh",
         "hermes-control-vllm-start-with-fallback.sh",
         "hermes-control-vllm-stop.sh",

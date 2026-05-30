@@ -9,6 +9,7 @@ import type {
   ModelActionId,
   ModelActionOptionViewModel,
   ModelActionProgressViewModel,
+  OpenWebUiActionId,
   OperationResponse,
   RouteOptionViewModel,
   RuntimeActionOptionViewModel,
@@ -27,6 +28,7 @@ export const navigationSections = [
   { id: 'runtime', label: 'Runtime' },
   { id: 'logs', label: 'Logs' },
   { id: 'audit', label: 'Audit' },
+  { id: 'info', label: 'Info' },
   { id: 'settings', label: 'Settings' },
 ] as const;
 
@@ -47,13 +49,35 @@ export function buildDashboardViewModel(snapshot: GuiDashboardSnapshot): Dashboa
 }
 
 export function buildRouteOptions(snapshot: GuiDashboardSnapshot): RouteOptionViewModel[] {
-  return snapshot.providers.map((provider) => ({
-    id: provider.id,
-    label: provider.display_name,
-    kind: provider.kind,
-    isActive: provider.id === snapshot.active_route.active_profile_id,
-    isLastKnownGood: provider.id === snapshot.active_route.last_known_good_profile_id,
-  }));
+  return snapshot.providers.map((provider) => {
+    const defaultAccount =
+      provider.accounts?.find((account) => account.id === provider.default_account_id) ??
+      provider.accounts?.find((account) => account.enabled);
+    const runtimeEnvKeys = Object.keys(provider.runtime_env ?? {}).sort();
+
+    return {
+      id: provider.id,
+      label: provider.display_name,
+      kind: provider.kind,
+      baseUrl: provider.base_url ?? 'local',
+      defaultModel:
+        provider.default_model ??
+        provider.anthropic_defaults?.model ??
+        provider.anthropic_defaults?.sonnet ??
+        provider.served_model_name ??
+        provider.models[0] ??
+        'not set',
+      accountSummary: defaultAccount
+        ? `${defaultAccount.id} / ${defaultAccount.display_name}`
+        : provider.api_key_ref
+          ? `legacy ref / ${provider.api_key_ref}`
+          : 'no secret required',
+      secretEnvKey: defaultAccount?.secret_env_key ?? (provider.api_key_ref ? 'provider default' : 'none'),
+      runtimeEnvKeys,
+      isActive: provider.id === snapshot.active_route.active_profile_id,
+      isLastKnownGood: provider.id === snapshot.active_route.last_known_good_profile_id,
+    };
+  });
 }
 
 export function buildLogTargets(): LogTargetViewModel[] {
@@ -138,6 +162,15 @@ export function buildHermesActionOptions(t?: Translator): RuntimeActionOptionVie
     { id: 'Stop', label: t?.('action.stop') ?? 'Stop', riskHint: t?.('risk.destructive') ?? 'Destructive' },
     { id: 'Restart', label: t?.('action.restart') ?? 'Restart', riskHint: t?.('risk.destructive') ?? 'Destructive' },
     { id: 'Kill', label: t?.('action.kill') ?? 'Kill', riskHint: t?.('risk.destructive') ?? 'Destructive' },
+  ];
+}
+
+export function buildOpenWebUiActionOptions(t?: Translator): RuntimeActionOptionViewModel<OpenWebUiActionId>[] {
+  return [
+    { id: 'Wake', label: t?.('action.wake') ?? 'Wake', riskHint: t?.('risk.normal') ?? 'Normal' },
+    { id: 'Stop', label: t?.('action.stop') ?? 'Stop', riskHint: t?.('risk.destructive') ?? 'Destructive' },
+    { id: 'Restart', label: t?.('action.restart') ?? 'Restart', riskHint: t?.('risk.destructive') ?? 'Destructive' },
+    { id: 'Status', label: t?.('action.status') ?? 'Status', riskHint: t?.('risk.readOnly') ?? 'Read-only' },
   ];
 }
 

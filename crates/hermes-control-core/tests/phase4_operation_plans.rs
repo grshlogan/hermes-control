@@ -1,5 +1,5 @@
-use hermes_control_core::{HermesRuntimeController, WslController};
-use hermes_control_types::{HermesAction, RiskLevel, WslAction};
+use hermes_control_core::{HermesRuntimeController, OpenWebUiController, WslController};
+use hermes_control_types::{HermesAction, OpenWebUiAction, RiskLevel, WslAction};
 
 #[test]
 fn wsl_restart_plan_uses_fixed_wsl_commands_and_requires_confirmation() {
@@ -87,6 +87,58 @@ fn hermes_restart_plan_uses_fixed_wsl_scripts_and_health_check() {
             "/opt/hermes-control/bin/hermes-control-health.sh",
             "30",
             "ready"
+        ]
+    );
+}
+
+#[test]
+fn openwebui_runtime_plans_use_fixed_wsl_scripts() {
+    let controller = OpenWebUiController::new("Ubuntu-Hermes-Codex", "root");
+
+    let wake = controller.plan(OpenWebUiAction::Wake);
+    assert_eq!(wake.risk, RiskLevel::NormalMutating);
+    assert!(!wake.requires_confirmation);
+    assert!(wake.summary.contains("Wake Open WebUI"));
+    assert_eq!(
+        wake.commands[0].args,
+        [
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "root",
+            "--exec",
+            "/opt/hermes-control/bin/hermes-control-openwebui-refresh.sh",
+            "force"
+        ]
+    );
+
+    let status = controller.plan(OpenWebUiAction::Status);
+    assert_eq!(status.risk, RiskLevel::ReadOnly);
+    assert!(!status.requires_confirmation);
+    assert_eq!(
+        status.commands[0].args,
+        [
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "root",
+            "--exec",
+            "/opt/hermes-control/bin/hermes-control-openwebui-status.sh"
+        ]
+    );
+
+    let stop = controller.plan(OpenWebUiAction::Stop);
+    assert_eq!(stop.risk, RiskLevel::Destructive);
+    assert!(stop.requires_confirmation);
+    assert_eq!(
+        stop.commands[0].args,
+        [
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "root",
+            "--exec",
+            "/opt/hermes-control/bin/hermes-control-openwebui-stop.sh"
         ]
     );
 }

@@ -1,4 +1,5 @@
 use std::{
+    collections::{BTreeMap, BTreeSet},
     fs, io,
     path::{Path, PathBuf},
     process::Command,
@@ -6,9 +7,11 @@ use std::{
 };
 
 use hermes_control_types::{
-    CommandPreview, ControlConfig, EndpointStatus, HealthStatus, HermesAction, ModelAction,
-    ModelRuntimeConfig, ModelRuntimeSummary, ModelRuntimeVariant, ModelRuntimesConfig,
-    ProvidersConfig, ReadOnlyStatus, RiskLevel, StateSummary, WslAction, WslDistroStatus,
+    AiProviderKind, AnthropicDefaults, CommandPreview, ControlConfig, EndpointStatus, HealthStatus,
+    HermesAction, ModelAction, ModelRuntimeConfig, ModelRuntimeSummary, ModelRuntimeVariant,
+    ModelRuntimesConfig, OpenWebUiAction, ProviderAccountConfig, ProviderConfig,
+    ProviderSecretSource, ProvidersConfig, ReadOnlyStatus, RiskLevel, StateSummary, WslAction,
+    WslDistroStatus,
 };
 use serde_json::Value;
 use thiserror::Error;
@@ -23,6 +26,8 @@ pub enum ConfigError {
     Io(#[from] io::Error),
     #[error("HTTP request failed: {0}")]
     Http(#[from] reqwest::Error),
+    #[error("provider import failed: {0}")]
+    ProviderImport(String),
     #[error("fixed command {program} failed with status {status}: {stderr}")]
     CommandFailed {
         program: &'static str,
@@ -43,6 +48,164 @@ pub fn parse_control_config(input: &str) -> Result<ControlConfig, ConfigError> {
 
 pub fn parse_providers_config(input: &str) -> Result<ProvidersConfig, ConfigError> {
     Ok(toml::from_str(input)?)
+}
+
+pub fn import_provider_json(input: &str) -> Result<ProvidersConfig, ConfigError> {
+    let value = serde_json::from_str::<Value>(input)?;
+
+    if value.get("providers").is_some() {
+        return serde_json::from_value::<ProvidersConfig>(value).map_err(Into::into);
+    }
+
+    import_env_style_provider(value)
+}
+
+fn import_env_style_provider(value: Value) -> Result<ProvidersConfig, ConfigError> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| ConfigError::ProviderImport("JSON root must be an object".to_owned()))?;
+    let import_type = object
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("claude-relay");
+    if !matches!(import_type, "claude-relay" | "anthropic-relay") {
+        return Err(ConfigError::ProviderImport(format!(
+            "unsupported provider import type: {import_type}"
+        )));
+    }
+
+    let token_ref = object
+        .get("ANTHROPIC_AUTH_TOKEN")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            ConfigError::ProviderImport(
+                "ANTHROPIC_AUTH_TOKEN must be an env or secret reference".to_owned(),
+            )
+        })?;
+    let (secret_ref, secret_env_key, secret_source) = parse_secret_reference(token_ref)?;
+    let base_url = get_json_string(object, "ANTHROPIC_BASE_URL")
+        .ok_or_else(|| ConfigError::ProviderImport("ANTHROPIC_BASE_URL is required".to_owned()))?;
+    let default_model = get_json_string(object, "ANTHROPIC_MODEL");
+    let sonnet = get_json_string(object, "ANTHROPIC_DEFAULT_SONNET_MODEL");
+    let haiku = get_json_string(object, "ANTHROPIC_DEFAULT_HAIKU_MODEL");
+    let opus = get_json_string(object, "ANTHROPIC_DEFAULT_OPUS_MODEL");
+    let models = [
+        default_model.clone(),
+        sonnet.clone(),
+        haiku.clone(),
+        opus.clone(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<BTreeSet<_>>()
+    .into_iter()
+    .collect::<Vec<_>>();
+    let mut runtime_env = BTreeMap::new();
+    for key in [
+        "API_TIMEOUT_MS",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "effortLevel",
+    ] {
+        if let Some(value) = get_json_string(object, key) {
+            runtime_env.insert(key.to_owned(), value);
+        }
+    }
+
+    let provider = ProviderConfig {
+        id: get_json_string(object, "id").unwrap_or_else(|| "external.api-relay".to_owned()),
+        kind: AiProviderKind::AnthropicClaude,
+        display_name: get_json_string(object, "name").unwrap_or_else(|| "Claude Relay".to_owned()),
+        base_url: Some(base_url),
+        api_key_ref: Some(secret_ref.clone()),
+        models,
+        default_account_id: Some("main".to_owned()),
+        default_model: default_model.clone().or_else(|| sonnet.clone()),
+        anthropic_defaults: Some(AnthropicDefaults {
+            model: default_model,
+            sonnet,
+            haiku,
+            opus,
+        }),
+        runtime_env,
+        accounts: vec![ProviderAccountConfig {
+            id: "main".to_owned(),
+            display_name: "Main relay token".to_owned(),
+            secret_ref,
+            secret_env_key,
+            secret_source,
+            enabled: true,
+            priority: 10,
+        }],
+        model_runtime: None,
+        served_model_name: None,
+    };
+
+    Ok(ProvidersConfig {
+        providers: vec![provider],
+    })
+}
+
+fn get_json_string(object: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn parse_secret_reference(
+    value: &str,
+) -> Result<(String, String, ProviderSecretSource), ConfigError> {
+    let trimmed = value.trim();
+    let env_key = trimmed
+        .strip_prefix("$env:")
+        .or_else(|| trimmed.strip_prefix("env:"));
+    if let Some(env_key) = env_key {
+        validate_env_key(env_key)?;
+        return Ok((
+            format!("env:{env_key}"),
+            env_key.to_owned(),
+            ProviderSecretSource::Env,
+        ));
+    }
+
+    if let Some(secret_ref) = trimmed.strip_prefix("secret_ref:") {
+        if secret_ref.trim().is_empty() {
+            return Err(ConfigError::ProviderImport(
+                "secret_ref import reference is empty".to_owned(),
+            ));
+        }
+        return Ok((
+            secret_ref.to_owned(),
+            "ANTHROPIC_AUTH_TOKEN".to_owned(),
+            ProviderSecretSource::SecretRef,
+        ));
+    }
+
+    Err(ConfigError::ProviderImport(
+        "raw secret values are not allowed in provider JSON imports".to_owned(),
+    ))
+}
+
+fn validate_env_key(value: &str) -> Result<(), ConfigError> {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return Err(ConfigError::ProviderImport("env key is empty".to_owned()));
+    };
+    if !first.is_ascii_uppercase() {
+        return Err(ConfigError::ProviderImport(format!(
+            "env key must start with an uppercase letter: {value}"
+        )));
+    }
+    if !chars.all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_') {
+        return Err(ConfigError::ProviderImport(format!(
+            "env key contains unsupported characters: {value}"
+        )));
+    }
+    Ok(())
 }
 
 pub fn parse_model_runtimes_config(input: &str) -> Result<ModelRuntimesConfig, ConfigError> {
@@ -136,6 +299,7 @@ impl FixedCommand {
         CommandPreview {
             program: self.program.executable().to_owned(),
             args: self.args.clone(),
+            env: BTreeMap::new(),
         }
     }
 }
@@ -257,6 +421,9 @@ const HERMES_CONTROL_VLLM_HEALTH_SCRIPT: &str = "hermes-control-vllm-health.sh";
 const HERMES_CONTROL_VLLM_LOGS_SCRIPT: &str = "hermes-control-vllm-logs.sh";
 const HERMES_CONTROL_VLLM_BENCHMARK_SCRIPT: &str = "hermes-control-vllm-benchmark.sh";
 const HERMES_CONTROL_VLLM_BOOTSTRAP_SCRIPT: &str = "hermes-control-vllm-bootstrap.sh";
+const HERMES_CONTROL_OPENWEBUI_STATUS_SCRIPT: &str = "hermes-control-openwebui-status.sh";
+const HERMES_CONTROL_OPENWEBUI_REFRESH_SCRIPT: &str = "hermes-control-openwebui-refresh.sh";
+const HERMES_CONTROL_OPENWEBUI_STOP_SCRIPT: &str = "hermes-control-openwebui-stop.sh";
 
 impl HermesRuntimeController {
     pub fn new(agent_root: impl Into<String>, health_url: impl Into<String>) -> Self {
@@ -347,6 +514,72 @@ impl HermesRuntimeController {
         if script == HERMES_CONTROL_HEALTH_SCRIPT {
             args.extend(["30".to_owned(), "ready".to_owned()]);
         }
+
+        FixedCommand {
+            program: FixedProgram::WslExe,
+            args,
+        }
+        .preview()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenWebUiController {
+    wsl_distro: String,
+    wsl_user: String,
+}
+
+impl OpenWebUiController {
+    pub fn new(wsl_distro: impl Into<String>, wsl_user: impl Into<String>) -> Self {
+        Self {
+            wsl_distro: wsl_distro.into(),
+            wsl_user: wsl_user.into(),
+        }
+    }
+
+    pub fn plan(&self, action: OpenWebUiAction) -> OperationPlan {
+        match action {
+            OpenWebUiAction::Wake => OperationPlan {
+                risk: RiskLevel::NormalMutating,
+                summary: format!("Wake Open WebUI in WSL distro {}.", self.wsl_distro),
+                commands: vec![
+                    self.openwebui_command(HERMES_CONTROL_OPENWEBUI_REFRESH_SCRIPT, &["force"]),
+                ],
+                requires_confirmation: false,
+            },
+            OpenWebUiAction::Stop => OperationPlan {
+                risk: RiskLevel::Destructive,
+                summary: format!("Stop Open WebUI in WSL distro {}.", self.wsl_distro),
+                commands: vec![self.openwebui_command(HERMES_CONTROL_OPENWEBUI_STOP_SCRIPT, &[])],
+                requires_confirmation: true,
+            },
+            OpenWebUiAction::Restart => OperationPlan {
+                risk: RiskLevel::Destructive,
+                summary: format!("Restart Open WebUI in WSL distro {}.", self.wsl_distro),
+                commands: vec![
+                    self.openwebui_command(HERMES_CONTROL_OPENWEBUI_REFRESH_SCRIPT, &["force"]),
+                ],
+                requires_confirmation: true,
+            },
+            OpenWebUiAction::Status => OperationPlan {
+                risk: RiskLevel::ReadOnly,
+                summary: format!("Check Open WebUI status in WSL distro {}.", self.wsl_distro),
+                commands: vec![self.openwebui_command(HERMES_CONTROL_OPENWEBUI_STATUS_SCRIPT, &[])],
+                requires_confirmation: false,
+            },
+        }
+    }
+
+    fn openwebui_command(&self, script: &str, script_args: &[&str]) -> CommandPreview {
+        let mut args = vec![
+            "--distribution".to_owned(),
+            self.wsl_distro.clone(),
+            "--user".to_owned(),
+            self.wsl_user.clone(),
+            "--exec".to_owned(),
+            format!("{HERMES_CONTROL_WSL_BIN}/{script}"),
+        ];
+        args.extend(script_args.iter().map(|arg| (*arg).to_owned()));
 
         FixedCommand {
             program: FixedProgram::WslExe,
@@ -783,6 +1016,32 @@ pub fn models_response_has_model(body: &str, served_model_name: &str) -> Result<
         }))
 }
 
+pub fn build_model_readiness_from_models_response(
+    models_endpoint: &str,
+    status_code: u16,
+    body: &str,
+    served_model_names: &[&str],
+) -> Result<Vec<(EndpointStatus, bool)>, ConfigError> {
+    let value = serde_json::from_str::<Value>(body)?;
+    let served = value
+        .get("data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|model| model.get("id").and_then(Value::as_str))
+        .collect::<BTreeSet<_>>();
+
+    Ok(served_model_names
+        .iter()
+        .map(|name| {
+            (
+                EndpointStatus::ok(models_endpoint, status_code),
+                served.contains(name),
+            )
+        })
+        .collect())
+}
+
 pub fn tail_file_lines(
     path: impl AsRef<Path>,
     line_count: usize,
@@ -825,20 +1084,25 @@ pub async fn check_endpoint(url: &str) -> EndpointStatus {
     }
 }
 
-async fn check_model_endpoint(
+async fn check_models_endpoint_for_names(
     models_endpoint: &str,
-    served_model_name: &str,
-) -> (EndpointStatus, bool) {
+    served_model_names: &[&str],
+) -> Vec<(EndpointStatus, bool)> {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()
     {
         Ok(client) => client,
         Err(err) => {
-            return (
-                EndpointStatus::unavailable(models_endpoint, err.to_string()),
-                false,
-            );
+            return served_model_names
+                .iter()
+                .map(|_| {
+                    (
+                        EndpointStatus::unavailable(models_endpoint, err.to_string()),
+                        false,
+                    )
+                })
+                .collect();
         }
     };
 
@@ -846,60 +1110,96 @@ async fn check_model_endpoint(
         Ok(response) => {
             let status = response.status();
             if !status.is_success() {
-                return (
-                    EndpointStatus {
-                        url: models_endpoint.to_owned(),
-                        reachable: true,
-                        status_code: Some(status.as_u16()),
-                        message: format!("http {status}"),
-                    },
-                    false,
-                );
+                return served_model_names
+                    .iter()
+                    .map(|_| {
+                        (
+                            EndpointStatus {
+                                url: models_endpoint.to_owned(),
+                                reachable: true,
+                                status_code: Some(status.as_u16()),
+                                message: format!("http {status}"),
+                            },
+                            false,
+                        )
+                    })
+                    .collect();
             }
 
             match response.text().await {
-                Ok(body) => {
-                    let ready =
-                        models_response_has_model(&body, served_model_name).unwrap_or(false);
-                    (EndpointStatus::ok(models_endpoint, status.as_u16()), ready)
-                }
-                Err(err) => (
-                    EndpointStatus {
-                        url: models_endpoint.to_owned(),
-                        reachable: true,
-                        status_code: Some(status.as_u16()),
-                        message: err.to_string(),
-                    },
-                    false,
-                ),
+                Ok(body) => build_model_readiness_from_models_response(
+                    models_endpoint,
+                    status.as_u16(),
+                    &body,
+                    served_model_names,
+                )
+                .unwrap_or_else(|err| {
+                    served_model_names
+                        .iter()
+                        .map(|_| {
+                            (
+                                EndpointStatus {
+                                    url: models_endpoint.to_owned(),
+                                    reachable: true,
+                                    status_code: Some(status.as_u16()),
+                                    message: err.to_string(),
+                                },
+                                false,
+                            )
+                        })
+                        .collect()
+                }),
+                Err(err) => served_model_names
+                    .iter()
+                    .map(|_| {
+                        (
+                            EndpointStatus {
+                                url: models_endpoint.to_owned(),
+                                reachable: true,
+                                status_code: Some(status.as_u16()),
+                                message: err.to_string(),
+                            },
+                            false,
+                        )
+                    })
+                    .collect(),
             }
         }
-        Err(err) => (
-            EndpointStatus::unavailable(models_endpoint, err.to_string()),
-            false,
-        ),
+        Err(err) => served_model_names
+            .iter()
+            .map(|_| {
+                (
+                    EndpointStatus::unavailable(models_endpoint, err.to_string()),
+                    false,
+                )
+            })
+            .collect(),
     }
 }
 
-async fn check_model_endpoint_candidates(
+async fn check_model_endpoint_candidates_for_names(
     models_endpoints: &[String],
-    served_model_name: &str,
-) -> (EndpointStatus, bool) {
-    let mut last = None;
+    served_model_names: &[&str],
+) -> Vec<(EndpointStatus, bool)> {
+    let mut results = served_model_names
+        .iter()
+        .map(|_| EndpointStatus::unavailable("unknown", "no model endpoint configured"))
+        .map(|status| (status, false))
+        .collect::<Vec<_>>();
+
     for endpoint in models_endpoints {
-        let (status, ready) = check_model_endpoint(endpoint, served_model_name).await;
-        if ready {
-            return (status, true);
+        let checked = check_models_endpoint_for_names(endpoint, served_model_names).await;
+        for (index, candidate) in checked.into_iter().enumerate() {
+            if !results[index].1 {
+                results[index] = candidate;
+            }
         }
-        last = Some(status);
+        if results.iter().all(|(_, ready)| *ready) {
+            break;
+        }
     }
 
-    (
-        last.unwrap_or_else(|| {
-            EndpointStatus::unavailable("unknown", "no model endpoint configured")
-        }),
-        false,
-    )
+    results
 }
 
 fn check_model_with_wsl_helper(
@@ -925,6 +1225,10 @@ fn check_model_with_wsl_helper(
     }
 }
 
+pub fn should_fallback_to_wsl_vllm_helper(endpoint_reachable: bool, ready: bool) -> bool {
+    endpoint_reachable && !ready
+}
+
 pub async fn collect_read_only_status(
     config_dir: impl AsRef<Path>,
 ) -> Result<ReadOnlyStatus, ConfigError> {
@@ -947,17 +1251,23 @@ pub async fn collect_read_only_status(
 
     let mut models = Vec::new();
     for runtime in &config.model_runtimes.runtimes {
-        for variant in &runtime.variants {
-            let mut endpoints = vec![runtime.models_endpoint.clone()];
-            endpoints.extend(
-                wsl_ips
-                    .iter()
-                    .filter_map(|ip| build_wsl_models_endpoint(&runtime.models_endpoint, ip)),
-            );
-            endpoints.dedup();
-            let (mut endpoint, mut ready) =
-                check_model_endpoint_candidates(&endpoints, &variant.served_model_name).await;
-            if !ready {
+        let mut endpoints = vec![runtime.models_endpoint.clone()];
+        endpoints.extend(
+            wsl_ips
+                .iter()
+                .filter_map(|ip| build_wsl_models_endpoint(&runtime.models_endpoint, ip)),
+        );
+        endpoints.dedup();
+        let served_model_names = runtime
+            .variants
+            .iter()
+            .map(|variant| variant.served_model_name.as_str())
+            .collect::<Vec<_>>();
+        let readiness =
+            check_model_endpoint_candidates_for_names(&endpoints, &served_model_names).await;
+
+        for (variant, (mut endpoint, mut ready)) in runtime.variants.iter().zip(readiness) {
+            if should_fallback_to_wsl_vllm_helper(endpoint.reachable, ready) {
                 for candidate in &endpoints {
                     if let Some((helper_endpoint, helper_ready)) = check_model_with_wsl_helper(
                         &runtime.wsl_distro,

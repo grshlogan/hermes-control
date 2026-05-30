@@ -111,11 +111,8 @@ Phase 5 basic closeout is complete:
   source or backup unless the user explicitly approves deletion.
 - Project runtime scripts now exist under `vLLM/scripts/` for environment setup,
   bootstrap/repair install, OpenAI-compatible serving, qwen36 MTP, and qwen36
-  AWQ INT4 eager startup.
-- `qwen36-mtp-tuned` is available as an experimental vLLM profile. It keeps the
-  default MTP profile untouched and uses `start-qwen36-mtp-tuned.sh` to test
-  conservative startup/performance flags such as worker spawn, NCCL defaults,
-  prefix caching, and chunked prefill.
+  AWQ INT4 eager startup. The temporary `qwen36-mtp-tuned` experiment is no
+  longer registered as a selectable runtime profile.
 - Live qwen36 MTP, Hermes gateway, and Open WebUI calls were verified on
   2026-05-03.
 
@@ -148,6 +145,16 @@ Phase 6 is complete:
   to restart Open WebUI with the restored route env.
 - `POST /v1/route/rollback`, CLI `route rollback`, and Telegram `/rollback`
   replay the last-known-good profile through the same route apply path.
+- `config/providers.toml` now includes `external.api-relay` as the first
+  Anthropic/Claude relay station profile. Its base URL and model names are
+  placeholders until a real relay is chosen; raw API keys still live outside the
+  daemon and are referenced through `ANTHROPIC_AUTH_TOKEN`.
+- Provider/route switch planning is moving from a flat profile shape toward a
+  three-layer model: provider site, account binding, and route selection. A
+  relay token should be bound once at the provider account level and reused by
+  Sonnet/Haiku/Opus or effort-level routes. JSON import should normalize common
+  Claude Code / CC Switch-style env JSON into this shape while rejecting raw API
+  key values.
 
 Phase 7 is complete for the Rust bot code phase:
 
@@ -346,7 +353,7 @@ Phase 6 route smoke:
 $env:HERMES_CONTROL_API_TOKEN = "phase6-token"
 cargo run -p hermes-control-daemon
 cargo run -p hermes-control-cli -- --api-token phase6-token route active
-cargo run -p hermes-control-cli -- --api-token phase6-token route switch external.openai-compatible --dry-run --reason "smoke"
+cargo run -p hermes-control-cli -- --api-token phase6-token route switch external.api-relay --dry-run --reason "smoke"
 ```
 
 ## Handoff Notes

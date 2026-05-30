@@ -260,11 +260,11 @@ plan_wsl2_hermes_provisioning.md
 
 ```powershell
 cargo run -p hermes-control-cli -- --api-token <token> route active
-cargo run -p hermes-control-cli -- --api-token <token> route switch external.openai-compatible --dry-run --reason "smoke"
+cargo run -p hermes-control-cli -- --api-token <token> route switch external.api-relay --dry-run --reason "smoke"
 cargo run -p hermes-control-cli -- --api-token <token> route rollback --dry-run --reason "rollback smoke"
 ```
 
-这一步会验证 provider、在切到 local vLLM profile 时检查模型 ready，并先通过 WSL root helper 应用 Hermes route env patch。外部 provider 的 `api_key_ref` 只会解析成 `LM_API_KEY` 这类 env key 名称，raw key 不经过 daemon。只有 helper 重启 Hermes、通过健康检查、同步 Open WebUI 持久配置，并在 Open WebUI 已运行时刷新进程后，daemon 才会维护 active route 和 last-known-good route。若 Open WebUI refresh 在 DB sync 后失败，helper 会恢复 Open WebUI DB 备份和旧 Hermes env，并尝试把 Open WebUI 拉回旧 route。`route rollback` 会重放 last-known-good profile 的同一条受控 route apply 流程。
+这一步会验证 provider、在切到 local vLLM profile 时检查模型 ready，并先通过 WSL root helper 应用 Hermes route env patch。当前第一条第三方 API 配置是 `external.api-relay`，代表 Anthropic/Claude 中转站；`base_url` 和 `models` 先是占位值，需要按实际中转站替换。外部 Claude provider 的 `api_key_ref` 只会解析成 `ANTHROPIC_AUTH_TOKEN` 这类 env key 名称，raw key 不经过 daemon。只有 helper 重启 Hermes、通过健康检查、同步 Open WebUI 持久配置，并在 Open WebUI 已运行时刷新进程后，daemon 才会维护 active route 和 last-known-good route。若 Open WebUI refresh 在 DB sync 后失败，helper 会恢复 Open WebUI DB 备份和旧 Hermes env，并尝试把 Open WebUI 拉回旧 route。`route rollback` 会重放 last-known-good profile 的同一条受控 route apply 流程。
 
 ## 文档入口
 

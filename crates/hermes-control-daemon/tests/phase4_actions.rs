@@ -141,6 +141,126 @@ async fn hermes_restart_dry_run_returns_fixed_wsl_script_previews() {
 }
 
 #[tokio::test]
+async fn openwebui_wake_dry_run_returns_fixed_wsl_script_preview() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let response = post_json(
+        router,
+        "/v1/openwebui/action",
+        json!({
+            "requester": {"channel": "gui", "user_id": "phase8-test"},
+            "action": "Wake",
+            "reason": "phase8 Open WebUI wake preview",
+            "dry_run": true
+        }),
+    )
+    .await;
+
+    assert_eq!(response["status"], "dry_run");
+    assert_eq!(response["risk"], "NormalMutating");
+    assert_eq!(
+        response["commands"][0]["args"],
+        json!([
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "root",
+            "--exec",
+            "/opt/hermes-control/bin/hermes-control-openwebui-refresh.sh",
+            "force"
+        ])
+    );
+}
+
+#[tokio::test]
+async fn openwebui_stop_creates_confirmation() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let response = post_json(
+        router,
+        "/v1/openwebui/action",
+        json!({
+            "requester": {"channel": "gui", "user_id": "phase8-test"},
+            "action": "Stop",
+            "reason": "phase8 Open WebUI stop",
+            "dry_run": false
+        }),
+    )
+    .await;
+
+    assert_eq!(response["status"], "confirmation_required");
+    assert_eq!(response["risk"], "Destructive");
+    assert!(
+        response["summary"]
+            .as_str()
+            .unwrap()
+            .contains("Stop Open WebUI")
+    );
+}
+
+#[tokio::test]
+async fn openwebui_status_executes_as_read_only_action() {
+    let fixture = Fixture::new();
+    let executor = Arc::new(RecordingExecutor::default());
+    let router = build_router_with_executor(&fixture.config_dir, TOKEN, executor.clone())
+        .expect("router should build");
+
+    let response = post_json(
+        router,
+        "/v1/openwebui/action",
+        json!({
+            "requester": {"channel": "gui", "user_id": "phase8-test"},
+            "action": "Status",
+            "reason": "phase8 Open WebUI status",
+            "dry_run": false
+        }),
+    )
+    .await;
+
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["risk"], "ReadOnly");
+
+    let operations = executor.operations.lock().expect("executor lock");
+    assert_eq!(operations.len(), 1);
+    assert_eq!(operations[0].action, "openwebui::Status");
+    assert_eq!(
+        operations[0].commands[0].args,
+        [
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "root",
+            "--exec",
+            "/opt/hermes-control/bin/hermes-control-openwebui-status.sh"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn openwebui_status_route_returns_read_only_preview() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let response = get_json(router, "/v1/openwebui/status").await;
+
+    assert_eq!(response["status"], "dry_run");
+    assert_eq!(response["risk"], "ReadOnly");
+    assert_eq!(
+        response["commands"][0]["args"],
+        json!([
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "root",
+            "--exec",
+            "/opt/hermes-control/bin/hermes-control-openwebui-status.sh"
+        ])
+    );
+}
+
+#[tokio::test]
 async fn model_start_dry_run_returns_fixed_vllm_script_previews() {
     let fixture = Fixture::new();
     let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
@@ -735,6 +855,136 @@ fn windows_executor_allows_fixed_vllm_wsl_scripts() {
 }
 
 #[test]
+fn windows_executor_allows_fixed_openwebui_wsl_scripts() {
+    let runner = Arc::new(RecordingRunner::default());
+    let executor = WindowsCommandExecutor::new(runner.clone());
+    let operation = ExecutableOperation {
+        id: "op_test".to_owned(),
+        confirmation_id: "confirm_test".to_owned(),
+        action: "openwebui::Wake".to_owned(),
+        requester_channel: "gui".to_owned(),
+        requester_user_id: "phase8-test".to_owned(),
+        summary: "Wake Open WebUI".to_owned(),
+        commands: vec![
+            command(
+                "wsl.exe",
+                [
+                    "--distribution",
+                    "Ubuntu-Hermes-Codex",
+                    "--user",
+                    "root",
+                    "--exec",
+                    "/opt/hermes-control/bin/hermes-control-openwebui-refresh.sh",
+                    "force",
+                ],
+            ),
+            command(
+                "wsl.exe",
+                [
+                    "--distribution",
+                    "Ubuntu-Hermes-Codex",
+                    "--user",
+                    "root",
+                    "--exec",
+                    "/opt/hermes-control/bin/hermes-control-openwebui-status.sh",
+                ],
+            ),
+            command(
+                "wsl.exe",
+                [
+                    "--distribution",
+                    "Ubuntu-Hermes-Codex",
+                    "--user",
+                    "root",
+                    "--exec",
+                    "/opt/hermes-control/bin/hermes-control-openwebui-stop.sh",
+                ],
+            ),
+        ],
+    };
+
+    let outcome = executor.execute(&operation);
+
+    assert_eq!(outcome.status, "completed", "{}", outcome.summary);
+    assert_eq!(
+        runner.commands.lock().expect("runner lock").clone(),
+        operation.commands
+    );
+}
+
+#[test]
+fn windows_executor_rejects_unknown_openwebui_refresh_mode() {
+    let runner = Arc::new(RecordingRunner::default());
+    let executor = WindowsCommandExecutor::new(runner.clone());
+    let operation = ExecutableOperation {
+        id: "op_test".to_owned(),
+        confirmation_id: "confirm_test".to_owned(),
+        action: "openwebui::Bad".to_owned(),
+        requester_channel: "gui".to_owned(),
+        requester_user_id: "phase8-test".to_owned(),
+        summary: "Bad Open WebUI command".to_owned(),
+        commands: vec![command(
+            "wsl.exe",
+            [
+                "--distribution",
+                "Ubuntu-Hermes-Codex",
+                "--user",
+                "root",
+                "--exec",
+                "/opt/hermes-control/bin/hermes-control-openwebui-refresh.sh",
+                "delete",
+            ],
+        )],
+    };
+
+    let outcome = executor.execute(&operation);
+
+    assert_eq!(outcome.status, "failed");
+    assert!(outcome.summary.contains("not allowlisted"));
+    assert!(runner.commands.lock().expect("runner lock").is_empty());
+}
+
+#[test]
+fn windows_executor_rejects_unallowlisted_route_apply_env_keys() {
+    let runner = Arc::new(RecordingRunner::default());
+    let executor = WindowsCommandExecutor::new(runner.clone());
+    let mut route_command = command(
+        "wsl.exe",
+        [
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "root",
+            "--exec",
+            "/opt/hermes-control/bin/hermes-control-route-apply.sh",
+            "external.api-relay",
+            "claude",
+            "https://api-relay.example.com/",
+            "claude-sonnet-4-6",
+            "ANTHROPIC_AUTH_TOKEN",
+        ],
+    );
+    route_command
+        .env
+        .insert("ANTHROPIC_AUTH_TOKEN".to_owned(), "raw-secret".to_owned());
+    let operation = ExecutableOperation {
+        id: "op_test".to_owned(),
+        confirmation_id: "confirm_test".to_owned(),
+        action: "route::switch::external.api-relay".to_owned(),
+        requester_channel: "cli".to_owned(),
+        requester_user_id: "phase6-test".to_owned(),
+        summary: "Bad route env".to_owned(),
+        commands: vec![route_command],
+    };
+
+    let outcome = executor.execute(&operation);
+
+    assert_eq!(outcome.status, "failed");
+    assert!(outcome.summary.contains("not allowlisted"));
+    assert!(runner.commands.lock().expect("runner lock").is_empty());
+}
+
+#[test]
 fn windows_executor_returns_stdout_for_log_actions() {
     let runner = Arc::new(StdoutRunner);
     let executor = WindowsCommandExecutor::new(runner);
@@ -835,6 +1085,7 @@ fn command<const N: usize>(program: &str, args: [&str; N]) -> hermes_control_typ
     hermes_control_types::CommandPreview {
         program: program.to_owned(),
         args: args.into_iter().map(ToOwned::to_owned).collect(),
+        env: std::collections::BTreeMap::new(),
     }
 }
 
@@ -842,6 +1093,25 @@ async fn post_json(router: Router, path: &str, body: Value) -> Value {
     let response = post_raw_json(router, path, body).await;
     assert_eq!(response.status, StatusCode::OK);
     serde_json::from_slice(&response.body).expect("response should be JSON")
+}
+
+async fn get_json(router: Router, path: &str) -> Value {
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(path)
+                .header(AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should collect");
+    serde_json::from_slice(&bytes).expect("response should be JSON")
 }
 
 struct TestResponse {

@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use hermes_control_types::{
     ActionRequest, ActiveRouteStatus, AuditEventSummary, CancelRequest, ConfirmRequest,
     ConfirmationLifecycleResponse, HealthStatus, HermesAction, ModelAction, ModelRuntimeSummary,
-    OperationResponse, ProviderConfig, ReadOnlyStatus, Requester, RequesterChannel,
-    RouteRollbackRequest, RouteSwitchRequest, WslAction,
+    OpenWebUiAction, OperationResponse, ProviderConfig, ReadOnlyStatus, Requester,
+    RequesterChannel, RouteRollbackRequest, RouteSwitchRequest, WslAction,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
@@ -172,6 +172,8 @@ pub enum GuiDaemonCommand {
     WslActionExecute,
     HermesActionPreview,
     HermesActionExecute,
+    OpenWebUiActionPreview,
+    OpenWebUiActionExecute,
     LogsTail,
 }
 
@@ -191,6 +193,8 @@ impl GuiDaemonCommand {
             Self::WslActionExecute,
             Self::HermesActionPreview,
             Self::HermesActionExecute,
+            Self::OpenWebUiActionPreview,
+            Self::OpenWebUiActionExecute,
             Self::LogsTail,
         ]
     }
@@ -210,6 +214,8 @@ impl GuiDaemonCommand {
             Self::WslActionExecute => "wsl_action_execute",
             Self::HermesActionPreview => "hermes_action_preview",
             Self::HermesActionExecute => "hermes_action_execute",
+            Self::OpenWebUiActionPreview => "openwebui_action_preview",
+            Self::OpenWebUiActionExecute => "openwebui_action_execute",
             Self::LogsTail => "logs_tail",
         }
     }
@@ -346,6 +352,26 @@ pub fn hermes_action_request(
     }
 }
 
+pub fn openwebui_action_request(
+    action: OpenWebUiAction,
+    operator_id: impl Into<String>,
+    dry_run: bool,
+) -> ActionRequest<OpenWebUiAction> {
+    let action_label = match action {
+        OpenWebUiAction::Wake => "wake",
+        OpenWebUiAction::Stop => "stop",
+        OpenWebUiAction::Restart => "restart",
+        OpenWebUiAction::Status => "status",
+    };
+
+    ActionRequest {
+        requester: gui_requester(operator_id),
+        action,
+        reason: format!("GUI Open WebUI {action_label}"),
+        dry_run,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GuiLogTarget {
@@ -422,9 +448,7 @@ impl GuiDaemonClient {
         let providers = self
             .get_json::<Vec<ProviderConfig>>("/v1/providers")
             .await?;
-        let models = self
-            .get_json::<Vec<ModelRuntimeSummary>>("/v1/models")
-            .await?;
+        let models = status.models.clone();
         let audit = self
             .get_json::<Vec<AuditEventSummary>>("/v1/audit?limit=20")
             .await?;
@@ -568,6 +592,30 @@ impl GuiDaemonClient {
         self.post_json(
             "/v1/hermes/action",
             &hermes_action_request(action, operator_id, false),
+        )
+        .await
+    }
+
+    pub async fn openwebui_action_preview(
+        &self,
+        action: OpenWebUiAction,
+        operator_id: impl Into<String>,
+    ) -> Result<OperationResponse, GuiError> {
+        self.post_json(
+            "/v1/openwebui/action",
+            &openwebui_action_request(action, operator_id, true),
+        )
+        .await
+    }
+
+    pub async fn openwebui_action_execute(
+        &self,
+        action: OpenWebUiAction,
+        operator_id: impl Into<String>,
+    ) -> Result<OperationResponse, GuiError> {
+        self.post_json(
+            "/v1/openwebui/action",
+            &openwebui_action_request(action, operator_id, false),
         )
         .await
     }

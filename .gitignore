@@ -19,6 +19,7 @@
 .env
 .env.*
 !.env.example
+.webui_secret_key
 
 *.sqlite
 *.sqlite-*

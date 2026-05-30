@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   Bot,
@@ -7,6 +7,7 @@ import {
   FileClock,
   Gauge,
   History,
+  Info,
   Logs,
   MonitorCog,
   Play,
@@ -32,9 +33,11 @@ import {
   previewRouteSwitch,
   executeModelAction,
   executeHermesAction,
+  executeOpenWebUiAction,
   executeWslAction,
   previewModelAction,
   previewHermesAction,
+  previewOpenWebUiAction,
   previewWslAction,
   isDesktopRuntime,
   readBrowserSettings,
@@ -47,6 +50,7 @@ import type {
   HermesActionId,
   LogTargetId,
   ModelActionId,
+  OpenWebUiActionId,
   OperationResponse,
   WslActionId,
 } from './lib/types';
@@ -60,6 +64,7 @@ import {
   buildLogTargets,
   buildModelActionProgressMessage,
   buildModelActionOptions,
+  buildOpenWebUiActionOptions,
   buildRouteOptions,
   buildSettingsViewModel,
   buildStateStoreSummary,
@@ -86,6 +91,7 @@ const navIcons = {
   runtime: MonitorCog,
   logs: Logs,
   audit: FileClock,
+  info: Info,
   settings: Settings,
 } as const;
 
@@ -96,6 +102,7 @@ const navLabelKeys = {
   runtime: 'nav.runtime',
   logs: 'nav.logs',
   audit: 'nav.audit',
+  info: 'nav.info',
   settings: 'nav.settings',
 } as const;
 
@@ -119,6 +126,7 @@ export default function App() {
   const [modelConfirmationCode, setModelConfirmationCode] = useState('');
   const [selectedWslAction, setSelectedWslAction] = useState<WslActionId>('Wake');
   const [selectedHermesAction, setSelectedHermesAction] = useState<HermesActionId>('Wake');
+  const [selectedOpenWebUiAction, setSelectedOpenWebUiAction] = useState<OpenWebUiActionId>('Status');
   const [runtimeResponse, setRuntimeResponse] = useState<OperationResponse | null>(null);
   const [runtimeMessage, setRuntimeMessage] = useState(() => t('runtime.initial'));
   const [runtimeBusy, setRuntimeBusy] = useState(false);
@@ -138,6 +146,7 @@ export default function App() {
     createTranslator(readLanguageSetting())('settings.localMessage'),
   );
   const [settingsBusy, setSettingsBusy] = useState(false);
+  const initialLoadStarted = useRef(false);
   const desktopRuntime = isDesktopRuntime();
 
   async function refresh() {
@@ -156,6 +165,10 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (initialLoadStarted.current) {
+      return;
+    }
+    initialLoadStarted.current = true;
     void refresh();
     void refreshConnectionSettings();
   }, []);
@@ -169,6 +182,7 @@ export default function App() {
   const modelActionOptions = useMemo(() => buildModelActionOptions(t), [language]);
   const wslActionOptions = useMemo(() => buildWslActionOptions(t), [language]);
   const hermesActionOptions = useMemo(() => buildHermesActionOptions(t), [language]);
+  const openWebUiActionOptions = useMemo(() => buildOpenWebUiActionOptions(t), [language]);
   const confirmationPrompt = useMemo(
     () => buildConfirmationPrompt(routePreview),
     [routePreview],
@@ -391,14 +405,16 @@ export default function App() {
     }
   }
 
-  async function previewSelectedRuntimeAction(target: 'wsl' | 'hermes') {
+  async function previewSelectedRuntimeAction(target: 'wsl' | 'hermes' | 'openwebui') {
     setRuntimeBusy(true);
     setRuntimeMessage(`${t('runtime.previewing')}: ${target}`);
     try {
-      const response =
-        target === 'wsl'
-          ? await previewWslAction(selectedWslAction)
-          : await previewHermesAction(selectedHermesAction);
+      const response = await previewRuntimeActionForTarget(
+        target,
+        selectedWslAction,
+        selectedHermesAction,
+        selectedOpenWebUiAction,
+      );
       setRuntimeResponse(response);
       setRuntimeMessage(response.summary || t('runtime.previewLoaded'));
     } catch (error) {
@@ -408,14 +424,16 @@ export default function App() {
     }
   }
 
-  async function executeSelectedRuntimeAction(target: 'wsl' | 'hermes') {
+  async function executeSelectedRuntimeAction(target: 'wsl' | 'hermes' | 'openwebui') {
     setRuntimeBusy(true);
     setRuntimeMessage(`${t('runtime.submitting')}: ${target}`);
     try {
-      const response =
-        target === 'wsl'
-          ? await executeWslAction(selectedWslAction)
-          : await executeHermesAction(selectedHermesAction);
+      const response = await executeRuntimeActionForTarget(
+        target,
+        selectedWslAction,
+        selectedHermesAction,
+        selectedOpenWebUiAction,
+      );
       setRuntimeResponse(response);
       setRuntimeConfirmationCode('');
       if (response.status === 'confirmation_required') {
@@ -654,10 +672,13 @@ export default function App() {
                 snapshot={snapshot}
                 wslOptions={wslActionOptions}
                 hermesOptions={hermesActionOptions}
+                openWebUiOptions={openWebUiActionOptions}
                 selectedWslAction={selectedWslAction}
                 setSelectedWslAction={setSelectedWslAction}
                 selectedHermesAction={selectedHermesAction}
                 setSelectedHermesAction={setSelectedHermesAction}
+                selectedOpenWebUiAction={selectedOpenWebUiAction}
+                setSelectedOpenWebUiAction={setSelectedOpenWebUiAction}
                 previewRuntimeAction={previewSelectedRuntimeAction}
                 executeRuntimeAction={executeSelectedRuntimeAction}
                 runtimeResponse={runtimeResponse}
@@ -697,6 +718,7 @@ export default function App() {
                 setQueryFilter={setAuditQueryFilter}
               />
             )}
+            {selectedSection === 'info' && <InfoPane t={t} />}
             {selectedSection === 'settings' && (
               <SettingsPane
                 settings={connectionSettings}
@@ -713,21 +735,42 @@ export default function App() {
               />
             )}
           </section>
-
-          <aside className="inspector" aria-label="Safety boundary">
-            <p className="eyebrow">{t('boundary.eyebrow')}</p>
-            <h2>{t('boundary.title')}</h2>
-            <p>{t('boundary.copy')}</p>
-            <div className="boundary-list">
-              <span>core:default</span>
-              <span>Authorization: Bearer</span>
-              <span>Requester: gui</span>
-            </div>
-          </aside>
         </section>
       </section>
     </main>
   );
+}
+
+type RuntimeTarget = 'wsl' | 'hermes' | 'openwebui';
+
+function previewRuntimeActionForTarget(
+  target: RuntimeTarget,
+  wslAction: WslActionId,
+  hermesAction: HermesActionId,
+  openWebUiAction: OpenWebUiActionId,
+): Promise<OperationResponse> {
+  if (target === 'wsl') {
+    return previewWslAction(wslAction);
+  }
+  if (target === 'hermes') {
+    return previewHermesAction(hermesAction);
+  }
+  return previewOpenWebUiAction(openWebUiAction);
+}
+
+function executeRuntimeActionForTarget(
+  target: RuntimeTarget,
+  wslAction: WslActionId,
+  hermesAction: HermesActionId,
+  openWebUiAction: OpenWebUiActionId,
+): Promise<OperationResponse> {
+  if (target === 'wsl') {
+    return executeWslAction(wslAction);
+  }
+  if (target === 'hermes') {
+    return executeHermesAction(hermesAction);
+  }
+  return executeOpenWebUiAction(openWebUiAction);
 }
 
 function readLanguageSetting(): LanguageId {
@@ -860,6 +903,11 @@ function RoutePane({
             value={[
               option.label,
               option.kind,
+              option.baseUrl,
+              option.defaultModel,
+              option.accountSummary,
+              option.secretEnvKey,
+              option.runtimeEnvKeys.length ? `env: ${option.runtimeEnvKeys.join(', ')}` : '',
               option.isActive ? t('route.active') : '',
               option.isLastKnownGood ? t('route.lastKnownGood') : '',
             ]
@@ -999,10 +1047,13 @@ function RuntimePane({
   snapshot,
   wslOptions,
   hermesOptions,
+  openWebUiOptions,
   selectedWslAction,
   setSelectedWslAction,
   selectedHermesAction,
   setSelectedHermesAction,
+  selectedOpenWebUiAction,
+  setSelectedOpenWebUiAction,
   previewRuntimeAction,
   executeRuntimeAction,
   runtimeResponse,
@@ -1018,12 +1069,15 @@ function RuntimePane({
   snapshot: GuiDashboardSnapshot | null;
   wslOptions: ReturnType<typeof buildWslActionOptions>;
   hermesOptions: ReturnType<typeof buildHermesActionOptions>;
+  openWebUiOptions: ReturnType<typeof buildOpenWebUiActionOptions>;
   selectedWslAction: WslActionId;
   setSelectedWslAction: (value: WslActionId) => void;
   selectedHermesAction: HermesActionId;
   setSelectedHermesAction: (value: HermesActionId) => void;
-  previewRuntimeAction: (target: 'wsl' | 'hermes') => void;
-  executeRuntimeAction: (target: 'wsl' | 'hermes') => void;
+  selectedOpenWebUiAction: OpenWebUiActionId;
+  setSelectedOpenWebUiAction: (value: OpenWebUiActionId) => void;
+  previewRuntimeAction: (target: RuntimeTarget) => void;
+  executeRuntimeAction: (target: RuntimeTarget) => void;
   runtimeResponse: OperationResponse | null;
   runtimeMessage: string;
   runtimeBusy: boolean;
@@ -1055,6 +1109,16 @@ function RuntimePane({
           setSelected={setSelectedHermesAction}
           preview={() => previewRuntimeAction('hermes')}
           run={() => executeRuntimeAction('hermes')}
+          busy={runtimeBusy}
+        />
+        <RuntimeActionGroup
+          t={t}
+          title={t('runtime.openwebui')}
+          options={openWebUiOptions}
+          selected={selectedOpenWebUiAction}
+          setSelected={setSelectedOpenWebUiAction}
+          preview={() => previewRuntimeAction('openwebui')}
+          run={() => executeRuntimeAction('openwebui')}
           busy={runtimeBusy}
         />
       </div>
@@ -1383,6 +1447,37 @@ function SettingsPane({
   );
 }
 
+function InfoPane({ t }: { t: ReturnType<typeof createTranslator> }) {
+  return (
+    <>
+      <PanelHeader title={t('info.title')} note={t('info.note')} />
+      <div className="info-layout">
+        <section className="info-section" aria-label={t('info.boundaryLabel')}>
+          <p className="eyebrow">{t('boundary.eyebrow')}</p>
+          <h3>{t('boundary.title')}</h3>
+          <p>{t('boundary.copy')}</p>
+          <div className="boundary-list">
+            <span>core:default</span>
+            <span>Authorization: Bearer</span>
+            <span>Requester: gui</span>
+          </div>
+        </section>
+        <section className="info-section" aria-label={t('info.openwebuiChain')}>
+          <p className="eyebrow">{t('info.openwebuiChain')}</p>
+          <h3>{t('runtime.openwebui')}</h3>
+          <p>{t('info.openwebuiChainCopy')}</p>
+          <div className="boundary-list">
+            <span>/v1/openwebui/action</span>
+            <span>hermes-control-openwebui-refresh.sh</span>
+            <span>hermes-control-openwebui-stop.sh</span>
+            <span>hermes-control-openwebui-status.sh</span>
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}
+
 function PanelHeader({ title, note }: { title: string; note: string }) {
   return (
     <header className="panel-header">
@@ -1421,9 +1516,14 @@ function OperationPreview({
       </div>
       {!!response.commands?.length && (
         <pre className="command-preview">
-          {response.commands.map((command) => `${command.program} ${command.args.join(' ')}`).join('\n')}
+          {response.commands.map((command) => {
+            const envKeys = Object.keys(command.env ?? {}).sort();
+            const envPreview = envKeys.length ? ` env:${envKeys.join(',')}` : '';
+            return `${command.program} ${command.args.join(' ')}${envPreview}`;
+          }).join('\n')}
         </pre>
       )}
+      {response.output && <pre className="command-preview">{response.output}</pre>}
     </section>
   );
 }

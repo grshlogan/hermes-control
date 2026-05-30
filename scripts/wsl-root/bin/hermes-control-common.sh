@@ -98,7 +98,6 @@ hc_extend_no_proxy_for_vllm() {
 : "${VLLM_LOG_DIR:=${VLLM_WORKSPACE}/logs}"
 : "${VLLM_PID_DIR:=/run/hermes-control}"
 : "${VLLM_START_QWEN36_MTP:=${VLLM_WORKSPACE}/scripts/start-qwen36-mtp.sh}"
-: "${VLLM_START_QWEN36_MTP_TUNED:=${VLLM_WORKSPACE}/scripts/start-qwen36-mtp-tuned.sh}"
 : "${VLLM_START_QWEN36_AWQ_INT4:=${VLLM_WORKSPACE}/scripts/start-qwen36-int4-eager.sh}"
 : "${VLLM_BOOTSTRAP_SCRIPT:=${VLLM_WORKSPACE}/scripts/bootstrap.sh}"
 
@@ -309,7 +308,6 @@ PY
 hc_vllm_served_model_for_variant() {
   case "${1:-}" in
     qwen36-mtp) printf '%s\n' "qwen36-mtp" ;;
-    qwen36-mtp-tuned) printf '%s\n' "qwen36-mtp-tuned" ;;
     qwen36-awq-int4) printf '%s\n' "qwen36-awq-int4" ;;
     *) return 1 ;;
   esac
@@ -318,7 +316,6 @@ hc_vllm_served_model_for_variant() {
 hc_vllm_start_script_for_variant() {
   case "${1:-}" in
     qwen36-mtp) printf '%s\n' "$VLLM_START_QWEN36_MTP" ;;
-    qwen36-mtp-tuned) printf '%s\n' "$VLLM_START_QWEN36_MTP_TUNED" ;;
     qwen36-awq-int4) printf '%s\n' "$VLLM_START_QWEN36_AWQ_INT4" ;;
     *) return 1 ;;
   esac

@@ -142,8 +142,17 @@ if secret_env_key != "none":
     if provider_kind in {"openai-compatible", "deepseek", "codex", "lm-studio"}:
         updates["LM_API_KEY"] = secret_value
     elif provider_kind == "claude":
+        updates["ANTHROPIC_BASE_URL"] = os.environ["HERMES_ROUTE_BASE_URL"]
         updates["ANTHROPIC_AUTH_TOKEN"] = secret_value
         updates["ANTHROPIC_MODEL"] = os.environ["HERMES_ROUTE_MODEL_ID"]
+        updates["ANTHROPIC_DEFAULT_SONNET_MODEL"] = os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL", os.environ["HERMES_ROUTE_MODEL_ID"])
+        updates["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = os.environ.get("ANTHROPIC_DEFAULT_HAIKU_MODEL", os.environ["HERMES_ROUTE_MODEL_ID"])
+        updates["ANTHROPIC_DEFAULT_OPUS_MODEL"] = os.environ.get("ANTHROPIC_DEFAULT_OPUS_MODEL", os.environ["HERMES_ROUTE_MODEL_ID"])
+
+for key in ["API_TIMEOUT_MS", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "effortLevel"]:
+    env_value = os.environ.get(key)
+    if env_value:
+        updates[key] = env_value
 
 seen = set()
 lines = []

@@ -45,6 +45,7 @@ export interface ModelActionProgressViewModel {
 
 export type WslActionId = 'Wake' | 'StopDistro' | 'RestartDistro' | 'ShutdownAll';
 export type HermesActionId = 'Wake' | 'Stop' | 'Restart' | 'Kill';
+export type OpenWebUiActionId = 'Wake' | 'Stop' | 'Restart' | 'Status';
 
 export interface RuntimeActionOptionViewModel<T extends string> {
   id: T;
@@ -77,8 +78,28 @@ export interface ProviderConfig {
   base_url?: string | null;
   api_key_ref?: string | null;
   models: string[];
+  default_account_id?: string | null;
+  default_model?: string | null;
+  anthropic_defaults?: {
+    model?: string | null;
+    sonnet?: string | null;
+    haiku?: string | null;
+    opus?: string | null;
+  } | null;
+  runtime_env?: Record<string, string>;
+  accounts?: ProviderAccountConfig[];
   model_runtime?: string | null;
   served_model_name?: string | null;
+}
+
+export interface ProviderAccountConfig {
+  id: string;
+  display_name: string;
+  secret_ref: string;
+  secret_env_key: string;
+  secret_source?: string;
+  enabled: boolean;
+  priority: number;
 }
 
 export interface AuditEventSummary {
@@ -113,6 +134,11 @@ export interface RouteOptionViewModel {
   id: string;
   label: string;
   kind: string;
+  baseUrl: string;
+  defaultModel: string;
+  accountSummary: string;
+  secretEnvKey: string;
+  runtimeEnvKeys: string[];
   isActive: boolean;
   isLastKnownGood: boolean;
 }
@@ -152,7 +178,7 @@ export interface OperationResponse {
   risk: string;
   summary: string;
   dry_run: boolean;
-  commands?: Array<{ program: string; args: string[] }>;
+  commands?: Array<{ program: string; args: string[]; env?: Record<string, string> }>;
   output?: string | null;
   confirmation_id?: string | null;
   code_hint?: string | null;

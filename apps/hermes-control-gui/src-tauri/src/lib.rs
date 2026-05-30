@@ -2,7 +2,7 @@ use hermes_control_gui::{
     GuiConfig, GuiConnectionSummary, GuiDaemonClient, GuiDashboardSnapshot, GuiLogTail,
     GuiLogTarget, gui_connection_summary_from_env,
 };
-use hermes_control_types::{HermesAction, ModelAction, OperationResponse, WslAction};
+use hermes_control_types::{HermesAction, ModelAction, OpenWebUiAction, OperationResponse, WslAction};
 
 #[tauri::command]
 fn gui_connection_summary() -> Result<GuiConnectionSummary, String> {
@@ -149,6 +149,26 @@ async fn gui_hermes_action_execute(action: HermesAction) -> Result<OperationResp
 }
 
 #[tauri::command]
+async fn gui_openwebui_action_preview(action: OpenWebUiAction) -> Result<OperationResponse, String> {
+    let config = GuiConfig::from_env().map_err(|err| err.to_string())?;
+    let client = GuiDaemonClient::from_config(&config);
+    client
+        .openwebui_action_preview(action, config.operator_id())
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn gui_openwebui_action_execute(action: OpenWebUiAction) -> Result<OperationResponse, String> {
+    let config = GuiConfig::from_env().map_err(|err| err.to_string())?;
+    let client = GuiDaemonClient::from_config(&config);
+    client
+        .openwebui_action_execute(action, config.operator_id())
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 async fn gui_log_tail(target: GuiLogTarget, tail: usize) -> Result<GuiLogTail, String> {
     let config = GuiConfig::from_env().map_err(|err| err.to_string())?;
     let client = GuiDaemonClient::from_config(&config);
@@ -176,6 +196,8 @@ pub fn run() {
             gui_wsl_action_execute,
             gui_hermes_action_preview,
             gui_hermes_action_execute,
+            gui_openwebui_action_preview,
+            gui_openwebui_action_execute,
             gui_log_tail
         ])
         .run(tauri::generate_context!())

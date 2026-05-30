@@ -67,6 +67,53 @@ async fn route_switch_dry_run_validates_provider_without_mutating_active_route()
 }
 
 #[tokio::test]
+async fn api_relay_route_preview_uses_anthropic_secret_boundary() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let response = post_json(
+        router,
+        "/v1/route/switch",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase6-test"},
+            "profile_id": "external.api-relay",
+            "reason": "relay dry-run",
+            "dry_run": true
+        }),
+    )
+    .await;
+
+    assert_eq!(response["status"], "dry_run");
+    assert_eq!(
+        response["commands"][0]["args"],
+        json!([
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "root",
+            "--exec",
+            "/opt/hermes-control/bin/hermes-control-route-apply.sh",
+            "external.api-relay",
+            "claude",
+            "https://api-relay.example.com/",
+            "claude-sonnet-4-6",
+            "ANTHROPIC_AUTH_TOKEN"
+        ])
+    );
+    assert_eq!(
+        response["commands"][0]["env"],
+        json!({
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-7",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6",
+            "API_TIMEOUT_MS": "600000",
+            "NO_PROXY": "127.0.0.1,localhost",
+            "effortLevel": "high"
+        })
+    );
+}
+
+#[tokio::test]
 async fn route_switch_updates_active_route_and_last_known_good() {
     let fixture = Fixture::new();
     let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
@@ -442,6 +489,35 @@ redact_secrets = true
         fs::write(
             config_dir.join("providers.toml"),
             r#"
+[[providers]]
+id = "external.api-relay"
+kind = "AnthropicClaude"
+display_name = "API Relay"
+base_url = "https://api-relay.example.com/"
+api_key_ref = "hermes/provider/api-relay"
+models = ["claude-sonnet-4-6", "claude-haiku-4-5"]
+default_account_id = "main"
+default_model = "claude-sonnet-4-6"
+
+[providers.anthropic_defaults]
+model = "claude-sonnet-4-6"
+sonnet = "claude-sonnet-4-6"
+haiku = "claude-haiku-4-5"
+opus = "claude-opus-4-7"
+
+[providers.runtime_env]
+API_TIMEOUT_MS = "600000"
+effortLevel = "high"
+NO_PROXY = "127.0.0.1,localhost"
+
+[[providers.accounts]]
+id = "main"
+display_name = "Main relay token"
+secret_ref = "env:ANTHROPIC_AUTH_TOKEN"
+secret_env_key = "ANTHROPIC_AUTH_TOKEN"
+enabled = true
+priority = 10
+
 [[providers]]
 id = "external.test"
 kind = "OpenAiCompatible"

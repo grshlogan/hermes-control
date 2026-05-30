@@ -1,8 +1,9 @@
 use std::fs;
 
 use hermes_control_core::{
-    FixedProgram, KnownWslOperation, WslCommandSpec, build_wsl_models_endpoint, load_config_dir,
-    models_response_has_model, parse_wsl_hostname_ips, parse_wsl_list_verbose, tail_file_lines,
+    FixedProgram, KnownWslOperation, WslCommandSpec, build_model_readiness_from_models_response,
+    build_wsl_models_endpoint, load_config_dir, models_response_has_model, parse_wsl_hostname_ips,
+    parse_wsl_list_verbose, should_fallback_to_wsl_vllm_helper, tail_file_lines,
     vllm_health_command, vllm_helper_response_ready,
 };
 
@@ -76,6 +77,35 @@ fn detects_expected_vllm_model_in_openai_models_response() {
 }
 
 #[test]
+fn builds_multiple_model_readiness_values_from_one_models_response() {
+    let endpoint = "http://127.0.0.1:18080/v1/models";
+    let body = r#"
+{
+  "object": "list",
+  "data": [
+    { "id": "qwen36-awq-int4", "object": "model" },
+    { "id": "qwen36-mtp", "object": "model" }
+  ]
+}
+"#;
+
+    let results = build_model_readiness_from_models_response(
+        endpoint,
+        200,
+        body,
+        &["qwen36-awq-int4", "qwen36-mtp", "missing-model"],
+    )
+    .expect("valid models response");
+
+    assert_eq!(results.len(), 3);
+    assert_eq!(results[0].1, true);
+    assert_eq!(results[1].1, true);
+    assert_eq!(results[2].1, false);
+    assert!(results.iter().all(|(status, _)| status.url == endpoint));
+    assert!(results.iter().all(|(status, _)| status.reachable));
+}
+
+#[test]
 fn parses_wsl_hostname_ips_for_vllm_endpoint_fallback() {
     let ips = parse_wsl_hostname_ips("10.2.176.55 172.18.0.1 \n");
 
@@ -112,6 +142,14 @@ fn detects_ready_vllm_helper_response() {
 
     assert!(vllm_helper_response_ready(body, "qwen36-mtp").expect("valid json"));
     assert!(!vllm_helper_response_ready(body, "qwen36-awq-int4").expect("valid json"));
+}
+
+#[test]
+fn skips_wsl_vllm_helper_when_runtime_endpoint_is_unreachable() {
+    assert!(!should_fallback_to_wsl_vllm_helper(false, false));
+    assert!(!should_fallback_to_wsl_vllm_helper(false, true));
+    assert!(should_fallback_to_wsl_vllm_helper(true, false));
+    assert!(!should_fallback_to_wsl_vllm_helper(true, true));
 }
 
 #[test]

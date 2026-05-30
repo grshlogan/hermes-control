@@ -39,7 +39,6 @@ fn project_vllm_runtime_assets_use_wsl_native_model_store() {
         "bootstrap.sh",
         "serve-openai.sh",
         "start-qwen36-mtp.sh",
-        "start-qwen36-mtp-tuned.sh",
         "start-qwen36-int4-eager.sh",
     ] {
         let path = script_root.join(script);
@@ -60,64 +59,27 @@ fn project_vllm_runtime_assets_use_wsl_native_model_store() {
 }
 
 #[test]
-fn qwen36_mtp_tuned_profile_is_isolated_from_default_start_path() {
+fn qwen36_mtp_tuned_profile_is_not_registered_as_a_runtime_variant() {
     let config = parse_model_runtimes_config(include_str!("../../../config/model-runtimes.toml"))
         .expect("model runtime config should parse");
     let runtime = &config.runtimes[0];
 
-    let default_mtp = runtime
-        .variants
-        .iter()
-        .find(|variant| variant.id == "qwen36-mtp")
-        .expect("default qwen36-mtp variant should exist");
-    let tuned_mtp = runtime
-        .variants
-        .iter()
-        .find(|variant| variant.id == "qwen36-mtp-tuned")
-        .expect("tuned qwen36-mtp variant should exist");
-
-    assert_eq!(tuned_mtp.served_model_name, "qwen36-mtp-tuned");
-    assert_eq!(tuned_mtp.mode, "latency-tuned");
-    assert_eq!(tuned_mtp.max_model_len, 90000);
-    assert_eq!(tuned_mtp.speculative_method.as_deref(), Some("mtp"));
-    assert_eq!(tuned_mtp.num_speculative_tokens, Some(2));
-
-    let default_script = default_mtp.start.script.as_deref().expect("default script");
-    let tuned_script = tuned_mtp.start.script.as_deref().expect("tuned script");
-    assert!(default_script.ends_with("start-qwen36-mtp.sh"));
-    assert!(tuned_script.ends_with("start-qwen36-mtp-tuned.sh"));
-    assert_ne!(default_script, tuned_script);
+    assert!(
+        runtime
+            .variants
+            .iter()
+            .any(|variant| variant.id == "qwen36-mtp")
+    );
+    assert!(
+        runtime
+            .variants
+            .iter()
+            .all(|variant| variant.id != "qwen36-mtp-tuned")
+    );
 }
 
 #[test]
-fn qwen36_mtp_tuned_script_borrows_only_low_risk_runtime_optimizations() {
-    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..");
-    let script = repo_root
-        .join("vLLM")
-        .join("scripts")
-        .join("start-qwen36-mtp-tuned.sh");
-
-    let contents = fs::read_to_string(&script).unwrap_or_else(|error| {
-        panic!("{} should read: {error}", script.display());
-    });
-
-    assert!(contents.contains("VLLM_WORKER_MULTIPROC_METHOD"));
-    assert!(contents.contains("NCCL_IB_DISABLE"));
-    assert!(contents.contains("NCCL_NET_GDR_LEVEL"));
-    assert!(contents.contains("--enable-prefix-caching"));
-    assert!(contents.contains("--enable-chunked-prefill"));
-    assert!(contents.contains("export TP=\"${TP:-2}\""));
-    assert!(contents.contains("export MAX_MODEL_LEN=\"${MAX_MODEL_LEN:-90000}\""));
-    assert!(contents.contains("export GPU_MEMORY_UTILIZATION=\"${GPU_MEMORY_UTILIZATION:-0.90}\""));
-    assert!(!contents.contains("VLLM_TEST_FORCE_FP8_MARLIN=1"));
-    assert!(!contents.contains("MAX_MODEL_LEN:-200000"));
-    assert!(!contents.contains("GPU_MEMORY_UTILIZATION:-0.94"));
-}
-
-#[test]
-fn wsl_root_helpers_allow_starting_qwen36_mtp_tuned_profile() {
+fn wsl_root_helpers_do_not_register_qwen36_mtp_tuned_profile() {
     let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..");
@@ -127,13 +89,12 @@ fn wsl_root_helpers_allow_starting_qwen36_mtp_tuned_profile() {
     let installer =
         fs::read_to_string(helper_root.join("install.sh")).expect("installer should read");
 
-    assert!(common.contains("VLLM_START_QWEN36_MTP_TUNED"));
-    assert!(common.contains("qwen36-mtp-tuned) printf '%s\\n' \"qwen36-mtp-tuned\""));
-    assert!(common.contains("qwen36-mtp-tuned) printf '%s\\n' \"$VLLM_START_QWEN36_MTP_TUNED\""));
-    assert!(common.contains("start-qwen36-mtp-tuned.sh"));
+    assert!(!common.contains("VLLM_START_QWEN36_MTP_TUNED"));
+    assert!(!common.contains("qwen36-mtp-tuned"));
+    assert!(!common.contains("start-qwen36-mtp-tuned.sh"));
 
-    assert!(installer.contains("VLLM_START_QWEN36_MTP_TUNED"));
-    assert!(installer.contains("start-qwen36-mtp-tuned.sh"));
+    assert!(installer.contains("remove_runtime_env \"VLLM_START_QWEN36_MTP_TUNED\""));
+    assert!(!installer.contains("start-qwen36-mtp-tuned.sh"));
 }
 
 #[test]

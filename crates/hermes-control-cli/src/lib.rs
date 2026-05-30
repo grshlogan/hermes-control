@@ -434,14 +434,43 @@ pub fn render_providers(
     Ok(providers
         .iter()
         .map(|provider| {
-            let secret = provider
-                .api_key_ref
-                .as_ref()
-                .map(|secret_ref| format!(" secret_ref={secret_ref}"))
+            let account = provider
+                .accounts
+                .iter()
+                .find(|account| {
+                    provider
+                        .default_account_id
+                        .as_ref()
+                        .is_some_and(|default_id| account.id == *default_id)
+                        && account.enabled
+                })
+                .or_else(|| provider.accounts.iter().find(|account| account.enabled));
+            let secret = account
+                .map(|account| {
+                    format!(
+                        " account={} secret_env_key={} secret_ref={}",
+                        account.id, account.secret_env_key, account.secret_ref
+                    )
+                })
+                .or_else(|| {
+                    provider
+                        .api_key_ref
+                        .as_ref()
+                        .map(|secret_ref| format!(" secret_ref={secret_ref}"))
+                })
                 .unwrap_or_default();
             format!(
-                "{} {:?} {}{}",
-                provider.id, provider.kind, provider.display_name, secret
+                "{} {:?} {} model={}{}",
+                provider.id,
+                provider.kind,
+                provider.display_name,
+                provider
+                    .default_model
+                    .as_deref()
+                    .or_else(|| provider.served_model_name.as_deref())
+                    .or_else(|| provider.models.first().map(String::as_str))
+                    .unwrap_or("none"),
+                secret
             )
         })
         .collect::<Vec<_>>()

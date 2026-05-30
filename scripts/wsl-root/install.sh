@@ -78,7 +78,6 @@ VLLM_MODELS_ENDPOINT=auto
 VLLM_LOG_DIR=/mnt/e/WSL/Hermres/hermes-control/vLLM/logs
 VLLM_PID_DIR=/run/hermes-control
 VLLM_START_QWEN36_MTP=/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/start-qwen36-mtp.sh
-VLLM_START_QWEN36_MTP_TUNED=/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/start-qwen36-mtp-tuned.sh
 VLLM_START_QWEN36_AWQ_INT4=/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/start-qwen36-int4-eager.sh
 VLLM_BOOTSTRAP_SCRIPT=/mnt/e/WSL/Hermres/hermes-control/vLLM/scripts/bootstrap.sh
 ENV
@@ -96,6 +95,11 @@ set_runtime_env() {
   else
     printf '%s=%s\n' "$key" "$value" >> "$RUNTIME_ENV"
   fi
+}
+
+remove_runtime_env() {
+  local key="$1"
+  sed -i "/^${key}=/d" "$RUNTIME_ENV"
 }
 
 set_runtime_env "VLLM_WORKSPACE" "$PROJECT_VLLM_WORKSPACE"
@@ -118,9 +122,9 @@ set_runtime_env "VLLM_MODELS_ENDPOINT" "auto"
 set_runtime_env "VLLM_LOG_DIR" "${PROJECT_VLLM_WORKSPACE}/logs"
 set_runtime_env "VLLM_PID_DIR" "/run/hermes-control"
 set_runtime_env "VLLM_START_QWEN36_MTP" "${PROJECT_VLLM_WORKSPACE}/scripts/start-qwen36-mtp.sh"
-set_runtime_env "VLLM_START_QWEN36_MTP_TUNED" "${PROJECT_VLLM_WORKSPACE}/scripts/start-qwen36-mtp-tuned.sh"
 set_runtime_env "VLLM_START_QWEN36_AWQ_INT4" "${PROJECT_VLLM_WORKSPACE}/scripts/start-qwen36-int4-eager.sh"
 set_runtime_env "VLLM_BOOTSTRAP_SCRIPT" "${PROJECT_VLLM_WORKSPACE}/scripts/bootstrap.sh"
+remove_runtime_env "VLLM_START_QWEN36_MTP_TUNED"
 
 echo "Installed Hermes Control WSL helpers to ${INSTALL_PREFIX}/bin"
 echo "Runtime config: ${RUNTIME_ENV}"

@@ -8,6 +8,7 @@ import type {
   HermesActionId,
   LogTargetId,
   ModelActionId,
+  OpenWebUiActionId,
   OperationResponse,
   WslActionId,
 } from './types';
@@ -232,6 +233,34 @@ export async function executeHermesAction(action: HermesActionId): Promise<Opera
   }) as Promise<OperationResponse>;
 }
 
+export async function previewOpenWebUiAction(action: OpenWebUiActionId): Promise<OperationResponse> {
+  if (isTauriRuntime()) {
+    return invoke<OperationResponse>('gui_openwebui_action_preview', { action });
+  }
+
+  const settings = readBrowserSettings();
+  return postJson(settings, '/v1/openwebui/action', {
+    requester: guiRequester(settings.operatorId),
+    action,
+    reason: `GUI Open WebUI ${runtimeActionReason(action)}`,
+    dry_run: true,
+  }) as Promise<OperationResponse>;
+}
+
+export async function executeOpenWebUiAction(action: OpenWebUiActionId): Promise<OperationResponse> {
+  if (isTauriRuntime()) {
+    return invoke<OperationResponse>('gui_openwebui_action_execute', { action });
+  }
+
+  const settings = readBrowserSettings();
+  return postJson(settings, '/v1/openwebui/action', {
+    requester: guiRequester(settings.operatorId),
+    action,
+    reason: `GUI Open WebUI ${runtimeActionReason(action)}`,
+    dry_run: false,
+  }) as Promise<OperationResponse>;
+}
+
 export async function loadLogTail(
   target: LogTargetId,
   tail = 200,
@@ -252,11 +281,10 @@ async function loadDashboardSnapshotViaHttp(
     throw new Error('Set HERMES_CONTROL_API_TOKEN in the desktop app environment or browser settings.');
   }
 
-  const [status, activeRoute, providers, models, audit] = await Promise.all([
+  const [status, activeRoute, providers, audit] = await Promise.all([
     getJson(settings, '/v1/status'),
     getJson(settings, '/v1/route/active'),
     getJson(settings, '/v1/providers'),
-    getJson(settings, '/v1/models'),
     getJson(settings, '/v1/audit?limit=20'),
   ]);
 
@@ -264,7 +292,7 @@ async function loadDashboardSnapshotViaHttp(
     status,
     active_route: activeRoute,
     providers,
-    models,
+    models: (status as GuiDashboardSnapshot['status']).models,
     audit,
   } as GuiDashboardSnapshot;
 }

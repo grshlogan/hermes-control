@@ -3,12 +3,12 @@ use std::path::Path;
 use hermes_control_gui::{
     GuiConfig, GuiDaemonCommand, GuiLogTarget, gui_boundary, gui_connection_summary_from_env_iter,
     gui_tauri_capability, hermes_action_request, log_tail_path, model_action_request,
-    operation_cancel_request, operation_confirm_request, route_rollback_request,
-    route_switch_request, wsl_action_request,
+    openwebui_action_request, operation_cancel_request, operation_confirm_request,
+    route_rollback_request, route_switch_request, wsl_action_request,
 };
 use hermes_control_types::{
-    ActionRequest, CancelRequest, ConfirmRequest, HermesAction, ModelAction, RequesterChannel,
-    RouteRollbackRequest, RouteSwitchRequest, WslAction,
+    ActionRequest, CancelRequest, ConfirmRequest, HermesAction, ModelAction, OpenWebUiAction,
+    RequesterChannel, RouteRollbackRequest, RouteSwitchRequest, WslAction,
 };
 
 #[test]
@@ -184,6 +184,19 @@ fn runtime_action_requests_use_gui_requester_and_action_reason() {
             dry_run: true,
         }
     );
+    assert_eq!(
+        openwebui_action_request(OpenWebUiAction::Restart, "desktop-operator", false),
+        ActionRequest {
+            requester: hermes_control_types::Requester {
+                channel: RequesterChannel::Gui,
+                user_id: "desktop-operator".to_owned(),
+                chat_id: None,
+            },
+            action: OpenWebUiAction::Restart,
+            reason: "GUI Open WebUI restart".to_owned(),
+            dry_run: false,
+        }
+    );
 }
 
 #[test]
@@ -228,6 +241,8 @@ fn gui_daemon_commands_do_not_include_raw_process_or_filesystem_access() {
     assert!(commands.contains(&GuiDaemonCommand::WslActionExecute));
     assert!(commands.contains(&GuiDaemonCommand::HermesActionPreview));
     assert!(commands.contains(&GuiDaemonCommand::HermesActionExecute));
+    assert!(commands.contains(&GuiDaemonCommand::OpenWebUiActionPreview));
+    assert!(commands.contains(&GuiDaemonCommand::OpenWebUiActionExecute));
     assert!(commands.contains(&GuiDaemonCommand::LogsTail));
 
     for command in commands {
@@ -276,4 +291,23 @@ fn tauri_capability_file_matches_safe_boundary_contract() {
     assert!(!content.contains("shell:"));
     assert!(!content.contains("fs:"));
     assert!(!content.contains("process"));
+}
+
+#[test]
+fn root_desktop_gui_launcher_wraps_tauri_start_mode() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let launcher_path = manifest_dir
+        .join("..")
+        .join("..")
+        .join("start-hermes-control-gui.ps1");
+
+    let content = std::fs::read_to_string(&launcher_path).expect("desktop launcher should exist");
+
+    assert!(content.contains("start-hermes-control.ps1"));
+    assert!(content.contains("-GuiMode"));
+    assert!(content.contains("Tauri"));
+    assert!(content.contains("-OperatorId"));
+    assert!(!content.contains("@arguments"));
+    assert!(!content.contains("Start-Process"));
+    assert!(!content.contains("npm run dev"));
 }

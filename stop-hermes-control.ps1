@@ -47,10 +47,20 @@ function Stop-PortOwner([int]$Port, [string[]]$AllowedNames) {
     }
 }
 
+function Stop-NamedProcess([string]$ProcessName) {
+    $processes = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue
+    foreach ($process in $processes) {
+        Write-Host "Stopping $($process.ProcessName) PID $($process.Id)"
+        Stop-Process -Id $process.Id -Force
+    }
+}
+
 Stop-PidFileProcess $GuiPidFile "GUI"
 Stop-PidFileProcess $DaemonPidFile "daemon"
 
 # Clean up common dev leftovers even if the PID files are missing.
+Stop-NamedProcess "hermes-control-gui-tauri"
+Stop-PortOwner 5173 @("node")
 Stop-PortOwner 5174 @("node")
 Stop-PortOwner 18787 @("hermes-control-daemon")
 

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs,
     path::{Path, PathBuf},
     process::Command,
@@ -17,14 +17,15 @@ use axum::{
     routing::{get, post},
 };
 use hermes_control_core::{
-    ConfigError, ConfigSet, HermesRuntimeController, ModelRuntimeController, OperationPlan,
-    WslController, collect_read_only_status, load_config_dir, tail_file_lines,
+    ConfigError, ConfigSet, HermesRuntimeController, ModelRuntimeController, OpenWebUiController,
+    OperationPlan, WslController, collect_read_only_status, load_config_dir, tail_file_lines,
 };
 use hermes_control_types::{
     ActionRequest, ActiveRouteStatus, AiProviderKind, AuditEventSummary, CancelRequest,
     CommandPreview, ConfirmRequest, ConfirmationLifecycleResponse, HealthStatus, HermesAction,
-    ModelAction, ModelRuntimeSummary, OperationResponse, ProviderConfig, ReadOnlyStatus, Requester,
-    RequesterChannel, RiskLevel, RouteRollbackRequest, RouteSwitchRequest, WslAction,
+    ModelAction, ModelRuntimeSummary, OpenWebUiAction, OperationResponse, ProviderConfig,
+    ReadOnlyStatus, Requester, RequesterChannel, RiskLevel, RouteRollbackRequest,
+    RouteSwitchRequest, WslAction,
 };
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
@@ -106,7 +107,11 @@ pub struct WindowsProcessRunner;
 
 impl CommandRunner for WindowsProcessRunner {
     fn run(&self, command: &CommandPreview) -> CommandOutput {
-        match Command::new(&command.program).args(&command.args).output() {
+        match Command::new(&command.program)
+            .args(&command.args)
+            .envs(&command.env)
+            .output()
+        {
             Ok(output) => CommandOutput {
                 status_code: output.status.code().unwrap_or(-1),
                 stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -259,6 +264,8 @@ pub fn build_router_with_executor(
         .route("/v1/wsl/action", post(wsl_action))
         .route("/v1/hermes/status", get(hermes_status))
         .route("/v1/hermes/action", post(hermes_action))
+        .route("/v1/openwebui/status", get(openwebui_status))
+        .route("/v1/openwebui/action", post(openwebui_action))
         .route("/v1/confirm", post(confirm_action))
         .route("/v1/cancel", post(cancel_action))
         .with_state(state)
@@ -296,13 +303,7 @@ async fn status(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<
 
 async fn health(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<HealthStatus> {
     require_auth(&state, &headers)?;
-    collect_read_only_status(&*state.config_dir)
-        .await
-        .map(|status| Json(status.overall))
-        .map_err(|err| {
-            tracing::warn!(error = %err, "failed to collect daemon health");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })
+    Ok(Json(HealthStatus::Ok))
 }
 
 async fn providers(
@@ -567,6 +568,7 @@ fn route_switch_plan(
         commands: vec![CommandPreview {
             program: "wsl.exe".to_owned(),
             args,
+            env: route_env_patch(provider),
         }],
         requires_confirmation: false,
     })
@@ -594,14 +596,25 @@ fn route_base_url(provider: &ProviderConfig) -> Option<String> {
 
 fn route_model_id(provider: &ProviderConfig) -> Option<String> {
     provider
-        .served_model_name
+        .default_model
         .clone()
+        .or_else(|| {
+            provider
+                .anthropic_defaults
+                .as_ref()
+                .and_then(|defaults| defaults.model.clone().or_else(|| defaults.sonnet.clone()))
+        })
+        .or_else(|| provider.served_model_name.clone())
         .or_else(|| provider.models.first().cloned())
 }
 
 fn route_secret_env_key(provider: &ProviderConfig) -> Option<String> {
     if matches!(&provider.kind, AiProviderKind::LocalVllm) {
         return Some("none".to_owned());
+    }
+
+    if let Some(account) = selected_provider_account(provider) {
+        return Some(account.secret_env_key.clone());
     }
 
     let _secret_ref = provider.api_key_ref.as_ref()?;
@@ -613,6 +626,56 @@ fn route_secret_env_key(provider: &ProviderConfig) -> Option<String> {
         AiProviderKind::LocalVllm | AiProviderKind::Disabled => return None,
     };
     Some(env_key.to_owned())
+}
+
+fn selected_provider_account(
+    provider: &ProviderConfig,
+) -> Option<&hermes_control_types::ProviderAccountConfig> {
+    if let Some(default_id) = &provider.default_account_id {
+        if let Some(account) = provider
+            .accounts
+            .iter()
+            .find(|account| account.enabled && account.id == *default_id)
+        {
+            return Some(account);
+        }
+    }
+
+    provider
+        .accounts
+        .iter()
+        .filter(|account| account.enabled)
+        .min_by_key(|account| account.priority)
+}
+
+fn route_env_patch(provider: &ProviderConfig) -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
+    if matches!(&provider.kind, AiProviderKind::AnthropicClaude) {
+        if let Some(defaults) = &provider.anthropic_defaults {
+            if let Some(model) = &defaults.sonnet {
+                env.insert("ANTHROPIC_DEFAULT_SONNET_MODEL".to_owned(), model.clone());
+            }
+            if let Some(model) = &defaults.haiku {
+                env.insert("ANTHROPIC_DEFAULT_HAIKU_MODEL".to_owned(), model.clone());
+            }
+            if let Some(model) = &defaults.opus {
+                env.insert("ANTHROPIC_DEFAULT_OPUS_MODEL".to_owned(), model.clone());
+            }
+        }
+    }
+
+    for key in [
+        "API_TIMEOUT_MS",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "effortLevel",
+    ] {
+        if let Some(value) = provider.runtime_env.get(key) {
+            env.insert(key.to_owned(), value.clone());
+        }
+    }
+    env
 }
 
 fn execute_route_apply_operation(
@@ -863,6 +926,48 @@ async fn hermes_action(
         config.control.wsl.default_user,
     );
     let action = format!("hermes::{:?}", request.action);
+    let plan = controller.plan(request.action);
+    operation_response(&state, request.requester, action, request.dry_run, plan).map(Json)
+}
+
+async fn openwebui_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<OperationResponse> {
+    require_auth(&state, &headers)?;
+    let config = load_config_dir(&*state.config_dir).map_err(|err| {
+        tracing::warn!(error = %err, "failed to load Open WebUI status config");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let controller =
+        OpenWebUiController::new(config.control.wsl.distro, config.control.wsl.default_user);
+    let plan = controller.plan(OpenWebUiAction::Status);
+    Ok(Json(OperationResponse {
+        status: "dry_run".to_owned(),
+        risk: plan.risk,
+        summary: plan.summary,
+        dry_run: true,
+        commands: plan.commands,
+        output: None,
+        confirmation_id: None,
+        code_hint: None,
+        expires_at: None,
+    }))
+}
+
+async fn openwebui_action(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ActionRequest<OpenWebUiAction>>,
+) -> ApiResult<OperationResponse> {
+    require_auth(&state, &headers)?;
+    let config = load_config_dir(&*state.config_dir).map_err(|err| {
+        tracing::warn!(error = %err, "failed to load Open WebUI action config");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let controller =
+        OpenWebUiController::new(config.control.wsl.distro, config.control.wsl.default_user);
+    let action = format!("openwebui::{:?}", request.action);
     let plan = controller.plan(request.action);
     operation_response(&state, request.requester, action, request.dry_run, plan).map(Json)
 }
@@ -1643,6 +1748,10 @@ fn mark_stale_running_operations_failed(
 }
 
 fn is_allowlisted_command(command: &CommandPreview) -> bool {
+    if !is_allowlisted_command_env(command) {
+        return false;
+    }
+
     if !command.program.eq_ignore_ascii_case("wsl.exe") {
         return false;
     }
@@ -1666,12 +1775,46 @@ fn is_allowlisted_command(command: &CommandPreview) -> bool {
     }
 }
 
+fn is_allowlisted_command_env(command: &CommandPreview) -> bool {
+    if command.env.is_empty() {
+        return true;
+    }
+
+    command
+        .env
+        .iter()
+        .all(|(key, value)| is_allowlisted_route_env_key(key) && is_safe_route_env_value(value))
+}
+
+fn is_allowlisted_route_env_key(value: &str) -> bool {
+    matches!(
+        value,
+        "ANTHROPIC_DEFAULT_SONNET_MODEL"
+            | "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+            | "ANTHROPIC_DEFAULT_OPUS_MODEL"
+            | "API_TIMEOUT_MS"
+            | "HTTP_PROXY"
+            | "HTTPS_PROXY"
+            | "NO_PROXY"
+            | "effortLevel"
+    )
+}
+
+fn is_safe_route_env_value(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 512
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':' | '/' | ','))
+}
+
 fn is_allowlisted_wsl_exec_tail(user: &str, command_tail: &[String]) -> bool {
     match command_tail {
         [command] if command == "true" => true,
         [script, args @ ..] => {
             is_allowlisted_hermes_script(user, script, args)
                 || is_allowlisted_vllm_script(user, script, args)
+                || is_allowlisted_openwebui_script(user, script, args)
         }
         _ => false,
     }
@@ -1740,6 +1883,23 @@ fn is_allowlisted_vllm_script(user: &str, script: &str, args: &[String]) -> bool
         }
         ("hermes-control-vllm-benchmark.sh", [variant]) => is_safe_identifier(variant),
         ("hermes-control-vllm-bootstrap.sh", [variant]) => is_safe_identifier(variant),
+        _ => false,
+    }
+}
+
+fn is_allowlisted_openwebui_script(user: &str, script: &str, args: &[String]) -> bool {
+    if user != "root" {
+        return false;
+    }
+
+    let Some(script_name) = script.strip_prefix("/opt/hermes-control/bin/") else {
+        return false;
+    };
+
+    match (script_name, args) {
+        ("hermes-control-openwebui-status.sh", []) => true,
+        ("hermes-control-openwebui-stop.sh", []) => true,
+        ("hermes-control-openwebui-refresh.sh", [mode]) => mode == "force" || mode == "if-running",
         _ => false,
     }
 }

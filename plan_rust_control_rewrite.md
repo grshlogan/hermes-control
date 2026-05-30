@@ -359,12 +359,33 @@ redact_secrets = true
 
 ```toml
 [[providers]]
-id = "external.openai-compatible"
-kind = "OpenAiCompatible"
-display_name = "External OpenAI-compatible API"
-base_url = "https://example.com/v1"
-api_key_ref = "hermes/provider/external-openai-compatible"
-models = ["gpt-like-coder", "reasoner"]
+id = "external.api-relay"
+kind = "AnthropicClaude"
+display_name = "API Relay"
+base_url = "https://api-relay.example.com/"
+api_key_ref = "hermes/provider/api-relay"
+models = ["claude-sonnet-4-6", "claude-haiku-4-5", "claude-opus-4-7"]
+default_account_id = "main"
+default_model = "claude-sonnet-4-6"
+
+[providers.anthropic_defaults]
+model = "claude-sonnet-4-6"
+sonnet = "claude-sonnet-4-6"
+haiku = "claude-haiku-4-5"
+opus = "claude-opus-4-7"
+
+[providers.runtime_env]
+API_TIMEOUT_MS = "600000"
+effortLevel = "high"
+NO_PROXY = "127.0.0.1,localhost"
+
+[[providers.accounts]]
+id = "main"
+display_name = "Main relay token"
+secret_ref = "env:ANTHROPIC_AUTH_TOKEN"
+secret_env_key = "ANTHROPIC_AUTH_TOKEN"
+enabled = true
+priority = 10
 
 [[providers]]
 id = "anthropic.claude"
@@ -386,6 +407,28 @@ base_url = "http://127.0.0.1:18080/v1"
 model_runtime = "vllm-local"
 served_model_name = "qwen36-mtp"
 ```
+
+Provider configuration is intentionally split into three layers:
+
+1. **Provider site**: the official service, relay station, local endpoint, or
+   local runtime boundary. It stores non-sensitive facts such as kind, base URL,
+   model catalog, default model, timeout/proxy hints, and Claude default model
+   aliases.
+2. **Account binding**: one provider can have one default token or a future
+   account pool. Account rows store only `secret_ref` and `secret_env_key`; raw
+   key values must live in WSL `/etc/hermes-control/runtime.env`, Windows
+   Credential Manager, DPAPI-backed storage, or another approved secret store.
+3. **Route selection**: a route switch chooses a provider, an account binding,
+   and a model/default profile. Switching Sonnet/Haiku/Opus or effort level must
+   reuse the provider account instead of asking the operator to enter the token
+   again.
+
+JSON import is an operator convenience, not a secret store. The importer must
+accept Hermes-native JSON and common env-style relay JSON such as Claude Code /
+CC Switch exports, normalize them into the same provider/account/route draft,
+and reject any payload that appears to contain a raw API key. Accepted secret
+references are forms such as `$env:ANTHROPIC_AUTH_TOKEN`,
+`env:ANTHROPIC_AUTH_TOKEN`, or `secret_ref:hermes/provider/api-relay/main`.
 
 ### 6.3 `model-runtimes.toml`
 
@@ -877,6 +920,10 @@ Dashboard
 
 AI Route
   - Provider cards: External API / Claude / DeepSeek / Codex / Local vLLM
+  - Provider type and endpoint family
+  - Non-sensitive provider/account details
+  - JSON import preview for provider/account/route drafts
+  - Secret placement guidance, without showing raw keys
   - Active route badge
   - Switch route flow
   - Last-known-good route

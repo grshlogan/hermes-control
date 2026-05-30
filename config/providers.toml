@@ -1,10 +1,31 @@
 [[providers]]
-id = "external.openai-compatible"
-kind = "OpenAiCompatible"
-display_name = "External OpenAI-compatible API"
-base_url = "https://example.com/v1"
-api_key_ref = "hermes/provider/external-openai-compatible"
-models = ["gpt-like-coder", "reasoner"]
+id = "external.api-relay"
+kind = "AnthropicClaude"
+display_name = "API Relay"
+base_url = "https://api-relay.example.com/"
+api_key_ref = "hermes/provider/api-relay"
+models = ["claude-sonnet-4-6", "claude-haiku-4-5", "claude-opus-4-7"]
+default_account_id = "main"
+default_model = "claude-sonnet-4-6"
+
+[providers.anthropic_defaults]
+model = "claude-sonnet-4-6"
+sonnet = "claude-sonnet-4-6"
+haiku = "claude-haiku-4-5"
+opus = "claude-opus-4-7"
+
+[providers.runtime_env]
+API_TIMEOUT_MS = "600000"
+effortLevel = "high"
+NO_PROXY = "127.0.0.1,localhost"
+
+[[providers.accounts]]
+id = "main"
+display_name = "Main relay token"
+secret_ref = "env:ANTHROPIC_AUTH_TOKEN"
+secret_env_key = "ANTHROPIC_AUTH_TOKEN"
+enabled = true
+priority = 10
 
 [[providers]]
 id = "local.vllm.qwen36-mtp"

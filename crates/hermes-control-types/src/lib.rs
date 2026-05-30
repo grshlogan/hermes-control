@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,6 +27,14 @@ pub enum WslAction {
     StopDistro,
     RestartDistro,
     ShutdownAll,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OpenWebUiAction {
+    Wake,
+    Stop,
+    Restart,
+    Status,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,9 +172,57 @@ pub struct ProviderConfig {
     #[serde(default)]
     pub models: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anthropic_defaults: Option<AnthropicDefaults>,
+    #[serde(default)]
+    pub runtime_env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub accounts: Vec<ProviderAccountConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_runtime: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub served_model_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnthropicDefaults {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sonnet: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub haiku: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opus: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderAccountConfig {
+    pub id: String,
+    pub display_name: String,
+    pub secret_ref: String,
+    pub secret_env_key: String,
+    #[serde(default)]
+    pub secret_source: ProviderSecretSource,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub priority: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderSecretSource {
+    #[default]
+    Env,
+    SecretRef,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -332,6 +390,8 @@ pub struct AuditEventSummary {
 pub struct CommandPreview {
     pub program: String,
     pub args: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

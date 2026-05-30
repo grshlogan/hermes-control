@@ -4,6 +4,48 @@ This document records landed structural changes after each working
 conversation. Keep entries short, factual, and ordered by time. Do not record
 unimplemented ideas here.
 
+## 2026-05-30: Add provider account bindings and Claude relay import schema
+
+- Extended provider config with account bindings, default account/model fields,
+  Claude default model aliases, and non-sensitive runtime env hints such as
+  `API_TIMEOUT_MS`, proxy keys, and `effortLevel`.
+- Added a Claude/Anthropic relay JSON importer that accepts env/secret
+  references like `$env:ANTHROPIC_AUTH_TOKEN` and rejects raw API key values.
+- Updated route switch previews so Claude relay helpers receive non-sensitive
+  env patch keys while raw provider tokens remain referenced only through
+  `secret_env_key`.
+- Updated route apply to preserve separate Claude Sonnet/Haiku/Opus defaults
+  and relay runtime env hints when applying the Hermes env patch.
+- Extended CLI and GUI route/provider summaries to show provider type, default
+  model, account binding, secret env key, and runtime env keys without exposing
+  raw secrets.
+
+## 2026-05-30: Move GUI info card and add Open WebUI runtime control
+
+- Moved the always-visible GUI boundary card into a dedicated sidebar
+  `Info`/`信息` page so routine control pages keep their full workspace width.
+- Added Open WebUI as a third Runtime control group beside WSL and Hermes, with
+  typed `Wake`, `Stop`, `Restart`, and `Status` actions.
+- Added daemon `/v1/openwebui/action` and `/v1/openwebui/status` endpoints backed
+  by fixed WSL root helper previews and execution allowlist checks.
+- Added `hermes-control-openwebui-stop.sh` and locked it into the WSL helper
+  install asset contract.
+- Kept the Tauri GUI thin-client boundary intact: no shell, filesystem, or raw
+  process permissions were added.
+
+## 2026-05-19: Remove tuned vLLM preset and add API relay provider
+
+- Removed the temporary `qwen36-mtp-tuned` preset from runtime config and WSL
+  helper registration, leaving only the default MTP and AWQ INT4 variants.
+- Made the WSL helper installer remove the obsolete
+  `VLLM_START_QWEN36_MTP_TUNED` runtime env key during refresh.
+- Added `external.api-relay` as the first Anthropic/Claude third-party relay
+  provider in `config/providers.toml`, matching relay configs that use
+  `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, and Claude model env names.
+- Kept raw relay API keys outside the repo and daemon payloads; route apply
+  still resolves the provider secret ref to the controlled
+  `ANTHROPIC_AUTH_TOKEN` env key inside WSL/Hermes scope.
+
 ## 2026-05-12: Add qwen36 MTP tuned vLLM profile
 
 - Added an isolated `qwen36-mtp-tuned` vLLM variant and
@@ -11,7 +53,9 @@ unimplemented ideas here.
 - Kept the default `qwen36-mtp` startup path unchanged.
 - Tuned profile borrows low-risk runtime flags only: spawn workers, conservative
   NCCL settings, prefix caching, and chunked prefill, while retaining TP=2,
-  90000 max context, and 0.90 GPU memory utilization defaults.
+  80000 max context, and 0.80 GPU memory utilization defaults.
+- The tuned profile prefers GPU order `0,1` so the RTX 5080 can be the primary
+  CUDA rank when display output is moved to the RTX 3080.
 - Updated WSL root helper install/runtime mappings so daemon model actions can
   start and stop the tuned variant through the product-owned helper boundary.
 

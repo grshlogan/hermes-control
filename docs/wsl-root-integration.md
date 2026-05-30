@@ -146,8 +146,15 @@ process probes such as `service-status.sh`.
 Apply a Hermes route profile through the fixed helper:
 
 ```powershell
-wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-route-apply.sh external.openai-compatible openai-compatible https://example.com/v1 gpt-like-coder LM_API_KEY
+wsl.exe -d Ubuntu-Hermes-Codex -u root --exec /opt/hermes-control/bin/hermes-control-route-apply.sh external.api-relay claude https://api-relay.example.com/ claude-sonnet-4-6 ANTHROPIC_AUTH_TOKEN
 ```
+
+`external.api-relay` is the first Anthropic/Claude relay profile. Replace the
+placeholder relay URL and model ID with the real relay station values before a
+live switch. Store the actual relay API key in WSL/Hermes scope as
+`ANTHROPIC_AUTH_TOKEN`; do not pass the raw key to the daemon. For Claude
+profiles, route apply writes `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL`, and the
+default Claude model env aliases alongside the token.
 
 For local vLLM, pass `auto-vllm` as the base URL. The helper resolves it to the
 WSL primary IP plus `VLLM_PORT`:

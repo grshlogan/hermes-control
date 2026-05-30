@@ -119,6 +119,16 @@ async fn phase3_router_serves_read_only_config_state_and_model_routes() {
 }
 
 #[tokio::test]
+async fn phase3_router_health_is_fast_daemon_liveness_probe() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let health = get_json(router, "/v1/health").await;
+
+    assert_eq!(health, serde_json::json!("Ok"));
+}
+
+#[tokio::test]
 async fn phase3_router_tails_daemon_logs_without_shell_execution() {
     let fixture = Fixture::new();
     let log_dir = fixture.root.join("logs/daemon");

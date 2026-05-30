@@ -20,7 +20,12 @@ This map explains where to work in the Hermes Control Rust workspace.
 - `config/control.toml`: daemon, WSL, Hermes health, log, and policy facts.
   Current machine facts: WSL default user is `root`; Hermes health is
   `http://127.0.0.1:8642/health`.
-- `config/providers.toml`: AI provider and route-source facts.
+- `config/providers.toml`: AI provider and route-source facts. The first
+  third-party Anthropic/Claude relay entry is `external.api-relay`; its URL,
+  model list, and secret ref are config facts, while raw API keys remain outside
+  the repo and daemon payloads. Provider work should treat a remote API as a
+  provider site plus account binding plus route/model choice; a token belongs to
+  the account binding and must be referenced by env key or secret ref only once.
 - `config/model-runtimes.toml`: local vLLM runtime and variant facts.
   Current machine facts: qwen36 MTP and AWQ variants run through WSL distro
   `Ubuntu-Hermes-Codex` and expose `/v1/models` on
@@ -138,10 +143,8 @@ This map explains where to work in the Hermes Control Rust workspace.
   - `bootstrap.sh`: creates or repairs the project-owned Python venv and installs
     vLLM.
   - `serve-openai.sh`: shared OpenAI-compatible vLLM launcher.
-  - `start-qwen36-mtp.sh`, `start-qwen36-mtp-tuned.sh`, and
-    `start-qwen36-int4-eager.sh`: fixed variant entry scripts consumed by WSL
-    root helpers. The tuned MTP script is experimental and does not replace the
-    default MTP startup path.
+  - `start-qwen36-mtp.sh` and `start-qwen36-int4-eager.sh`: fixed variant entry
+    scripts consumed by WSL root helpers.
 
 - `crates/hermes-control-cli`
   - Clap command definitions and CLI rendering.
@@ -276,6 +279,9 @@ This map explains where to work in the Hermes Control Rust workspace.
 ## Where To Make Changes
 
 - New config field: `types` first, then `core` parser/tests, then config file.
+- New provider import field: add the typed config/import DTO, add a parser or
+  normalization test first, then wire daemon/helper/GUI behavior. JSON import
+  must reject raw API key values and preserve only env keys or secret refs.
 - New read-only status fact: `types` DTO, `core` collector, CLI renderer, daemon
   route once Phase 3 lands.
 - New CLI command: `cli` parser/rendering, then daemon client path if mutating.

@@ -9,6 +9,7 @@ import {
   buildHermesActionOptions,
   buildModelActionProgressMessage,
   buildModelActionOptions,
+  buildOpenWebUiActionOptions,
   buildRouteOptions,
   buildSettingsViewModel,
   buildStateStoreSummary,
@@ -64,6 +65,20 @@ const snapshot: GuiDashboardSnapshot = {
       kind: 'DeepSeek',
       display_name: 'DeepSeek',
       models: ['deepseek-chat'],
+      default_account_id: 'main',
+      default_model: 'deepseek-chat',
+      runtime_env: { API_TIMEOUT_MS: '600000' },
+      accounts: [
+        {
+          id: 'main',
+          display_name: 'Main DeepSeek token',
+          secret_ref: 'env:DEEPSEEK_API_KEY',
+          secret_env_key: 'DEEPSEEK_API_KEY',
+          secret_source: 'env',
+          enabled: true,
+          priority: 10,
+        },
+      ],
     },
   ],
   models: [
@@ -135,6 +150,7 @@ describe('Phase8 GUI view model', () => {
       'runtime',
       'logs',
       'audit',
+      'info',
       'settings',
     ]);
   });
@@ -149,6 +165,11 @@ describe('Phase8 GUI view model', () => {
         id: 'local.qwen36-mtp',
         label: 'Qwen 36 MTP',
         kind: 'LocalVllm',
+        baseUrl: 'local',
+        defaultModel: 'qwen36-mtp',
+        accountSummary: 'no secret required',
+        secretEnvKey: 'none',
+        runtimeEnvKeys: [],
         isActive: true,
         isLastKnownGood: false,
       },
@@ -156,6 +177,11 @@ describe('Phase8 GUI view model', () => {
         id: 'external.deepseek',
         label: 'DeepSeek',
         kind: 'DeepSeek',
+        baseUrl: 'local',
+        defaultModel: 'deepseek-chat',
+        accountSummary: 'main / Main DeepSeek token',
+        secretEnvKey: 'DEEPSEEK_API_KEY',
+        runtimeEnvKeys: ['API_TIMEOUT_MS'],
         isActive: false,
         isLastKnownGood: true,
       },
@@ -213,6 +239,12 @@ describe('Phase8 GUI view model', () => {
       { id: 'Stop', label: 'Stop', riskHint: 'Destructive' },
       { id: 'Restart', label: 'Restart', riskHint: 'Destructive' },
       { id: 'Kill', label: 'Kill', riskHint: 'Destructive' },
+    ]);
+    expect(buildOpenWebUiActionOptions()).toEqual([
+      { id: 'Wake', label: 'Wake', riskHint: 'Normal' },
+      { id: 'Stop', label: 'Stop', riskHint: 'Destructive' },
+      { id: 'Restart', label: 'Restart', riskHint: 'Destructive' },
+      { id: 'Status', label: 'Status', riskHint: 'Read-only' },
     ]);
   });
 
