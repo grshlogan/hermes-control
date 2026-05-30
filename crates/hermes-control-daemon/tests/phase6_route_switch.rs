@@ -114,6 +114,48 @@ async fn api_relay_route_preview_uses_anthropic_secret_boundary() {
 }
 
 #[tokio::test]
+async fn deepseek_route_preview_uses_official_api_secret_boundary() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let response = post_json(
+        router,
+        "/v1/route/switch",
+        json!({
+            "requester": {"channel": "cli", "user_id": "phase6-test"},
+            "profile_id": "deepseek.official",
+            "reason": "deepseek official dry-run",
+            "dry_run": true
+        }),
+    )
+    .await;
+
+    assert_eq!(response["status"], "dry_run");
+    assert_eq!(
+        response["commands"][0]["args"],
+        json!([
+            "--distribution",
+            "Ubuntu-Hermes-Codex",
+            "--user",
+            "root",
+            "--exec",
+            "/opt/hermes-control/bin/hermes-control-route-apply.sh",
+            "deepseek.official",
+            "deepseek",
+            "https://api.deepseek.com/v1",
+            "deepseek-chat",
+            "DEEPSEEK_API_KEY"
+        ])
+    );
+    assert_eq!(
+        response["commands"][0]["env"],
+        json!({
+            "API_TIMEOUT_MS": "600000"
+        })
+    );
+}
+
+#[tokio::test]
 async fn route_switch_updates_active_route_and_last_known_good() {
     let fixture = Fixture::new();
     let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
@@ -515,6 +557,27 @@ id = "main"
 display_name = "Main relay token"
 secret_ref = "env:ANTHROPIC_AUTH_TOKEN"
 secret_env_key = "ANTHROPIC_AUTH_TOKEN"
+enabled = true
+priority = 10
+
+[[providers]]
+id = "deepseek.official"
+kind = "DeepSeek"
+display_name = "DeepSeek Official API"
+base_url = "https://api.deepseek.com/v1"
+api_key_ref = "env:DEEPSEEK_API_KEY"
+models = ["deepseek-chat", "deepseek-reasoner"]
+default_account_id = "main"
+default_model = "deepseek-chat"
+
+[providers.runtime_env]
+API_TIMEOUT_MS = "600000"
+
+[[providers.accounts]]
+id = "main"
+display_name = "Main DeepSeek token"
+secret_ref = "env:DEEPSEEK_API_KEY"
+secret_env_key = "DEEPSEEK_API_KEY"
 enabled = true
 priority = 10
 

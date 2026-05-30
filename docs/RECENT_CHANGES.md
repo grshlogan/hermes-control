@@ -4,6 +4,13 @@ This document records landed structural changes after each working
 conversation. Keep entries short, factual, and ordered by time. Do not record
 unimplemented ideas here.
 
+## 2026-05-31: Add DeepSeek official route apply coverage
+
+- Added daemon route-switch dry-run coverage for `deepseek.official`, using
+  `https://api.deepseek.com/v1`, `deepseek-chat`, and `DEEPSEEK_API_KEY`.
+- Added a WSL helper sandbox test proving DeepSeek account env keys are copied
+  to `LM_API_KEY` for Hermes runtime without printing raw token values.
+
 ## 2026-05-30: Harden native provider JSON import previews
 
 - Extended native `{"providers":[...]}` JSON imports to normalize provider
