@@ -155,6 +155,48 @@ async fn phase3_router_previews_provider_json_import_without_raw_secret_storage(
 }
 
 #[tokio::test]
+async fn phase3_router_rejects_native_provider_json_with_raw_account_secret() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let status = post_json_status(
+        router,
+        "/v1/providers/import/preview",
+        json!({
+            "requester": {"channel": "gui", "user_id": "desktop-operator"},
+            "source": "json",
+            "payload": r#"{
+              "providers": [
+                {
+                  "id": "external.openai-relay",
+                  "kind": "OpenAiCompatible",
+                  "display_name": "Unsafe OpenAI Relay",
+                  "base_url": "https://openai-relay.example.com/v1",
+                  "models": ["gpt-4.1"],
+                  "default_account_id": "main",
+                  "default_model": "gpt-4.1",
+                  "accounts": [
+                    {
+                      "id": "main",
+                      "display_name": "Main",
+                      "secret_ref": "sk-raw-openai-token",
+                      "secret_env_key": "OPENAI_API_KEY",
+                      "enabled": true,
+                      "priority": 10
+                    }
+                  ]
+                }
+              ]
+            }"#,
+            "dry_run": true
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn phase3_router_health_is_fast_daemon_liveness_probe() {
     let fixture = Fixture::new();
     let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
@@ -218,7 +260,20 @@ async fn get_json(router: Router, path: &str) -> Value {
 }
 
 async fn post_json(router: Router, path: &str, body: Value) -> Value {
-    let response = router
+    let response = post_json_response(router, path, body).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should collect");
+    serde_json::from_slice(&bytes).expect("response should be JSON")
+}
+
+async fn post_json_status(router: Router, path: &str, body: Value) -> StatusCode {
+    post_json_response(router, path, body).await.status()
+}
+
+async fn post_json_response(router: Router, path: &str, body: Value) -> axum::response::Response {
+    router
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -229,12 +284,7 @@ async fn post_json(router: Router, path: &str, body: Value) -> Value {
                 .expect("request should build"),
         )
         .await
-        .expect("request should complete");
-    assert_eq!(response.status(), StatusCode::OK);
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body should collect");
-    serde_json::from_slice(&bytes).expect("response should be JSON")
+        .expect("request should complete")
 }
 
 fn table_names(path: &Path) -> Vec<String> {

@@ -54,10 +54,59 @@ pub fn import_provider_json(input: &str) -> Result<ProvidersConfig, ConfigError>
     let value = serde_json::from_str::<Value>(input)?;
 
     if value.get("providers").is_some() {
-        return serde_json::from_value::<ProvidersConfig>(value).map_err(Into::into);
+        let mut providers = serde_json::from_value::<ProvidersConfig>(value)?;
+        normalize_imported_providers(&mut providers)?;
+        return Ok(providers);
     }
 
     import_env_style_provider(value)
+}
+
+fn normalize_imported_providers(config: &mut ProvidersConfig) -> Result<(), ConfigError> {
+    for provider in &mut config.providers {
+        let provider_default_env_key = default_secret_env_key_for_provider(&provider.kind);
+
+        if let Some(api_key_ref) = provider.api_key_ref.clone() {
+            let (secret_ref, _, _) =
+                parse_secret_reference(&api_key_ref, provider_default_env_key)?;
+            provider.api_key_ref = Some(secret_ref);
+        }
+
+        for account in &mut provider.accounts {
+            let account_env_key = account.secret_env_key.trim();
+            let default_env_key = if account_env_key.is_empty() {
+                provider_default_env_key
+            } else {
+                account_env_key
+            };
+            let (secret_ref, secret_env_key, secret_source) =
+                parse_secret_reference(&account.secret_ref, default_env_key)?;
+            if matches!(secret_source, ProviderSecretSource::Env)
+                && !account_env_key.is_empty()
+                && account_env_key != secret_env_key
+            {
+                return Err(ConfigError::ProviderImport(format!(
+                    "account {} secret_env_key does not match env secret reference",
+                    account.id
+                )));
+            }
+            account.secret_ref = secret_ref;
+            account.secret_env_key = secret_env_key;
+            account.secret_source = secret_source;
+        }
+    }
+
+    Ok(())
+}
+
+fn default_secret_env_key_for_provider(kind: &AiProviderKind) -> &'static str {
+    match kind {
+        AiProviderKind::AnthropicClaude => "ANTHROPIC_AUTH_TOKEN",
+        AiProviderKind::DeepSeek => "DEEPSEEK_API_KEY",
+        AiProviderKind::Codex => "CODEX_API_KEY",
+        AiProviderKind::OpenAiCompatible | AiProviderKind::LmStudio => "LM_API_KEY",
+        AiProviderKind::LocalVllm | AiProviderKind::Disabled => "LM_API_KEY",
+    }
 }
 
 fn import_env_style_provider(value: Value) -> Result<ProvidersConfig, ConfigError> {
@@ -68,12 +117,16 @@ fn import_env_style_provider(value: Value) -> Result<ProvidersConfig, ConfigErro
         .get("type")
         .and_then(Value::as_str)
         .unwrap_or("claude-relay");
-    if !matches!(import_type, "claude-relay" | "anthropic-relay") {
-        return Err(ConfigError::ProviderImport(format!(
-            "unsupported provider import type: {import_type}"
-        )));
+    if matches!(import_type, "claude-relay" | "anthropic-relay") {
+        return import_anthropic_env_style_provider(object);
     }
 
+    import_openai_family_env_style_provider(object, import_type)
+}
+
+fn import_anthropic_env_style_provider(
+    object: &serde_json::Map<String, Value>,
+) -> Result<ProvidersConfig, ConfigError> {
     let token_ref = object
         .get("ANTHROPIC_AUTH_TOKEN")
         .and_then(Value::as_str)
@@ -82,7 +135,8 @@ fn import_env_style_provider(value: Value) -> Result<ProvidersConfig, ConfigErro
                 "ANTHROPIC_AUTH_TOKEN must be an env or secret reference".to_owned(),
             )
         })?;
-    let (secret_ref, secret_env_key, secret_source) = parse_secret_reference(token_ref)?;
+    let (secret_ref, secret_env_key, secret_source) =
+        parse_secret_reference(token_ref, "ANTHROPIC_AUTH_TOKEN")?;
     let base_url = get_json_string(object, "ANTHROPIC_BASE_URL")
         .ok_or_else(|| ConfigError::ProviderImport("ANTHROPIC_BASE_URL is required".to_owned()))?;
     let default_model = get_json_string(object, "ANTHROPIC_MODEL");
@@ -147,6 +201,124 @@ fn import_env_style_provider(value: Value) -> Result<ProvidersConfig, ConfigErro
     })
 }
 
+fn import_openai_family_env_style_provider(
+    object: &serde_json::Map<String, Value>,
+    import_type: &str,
+) -> Result<ProvidersConfig, ConfigError> {
+    let family = provider_import_family(import_type)?;
+    let base_url = first_json_string(object, family.base_url_keys).ok_or_else(|| {
+        ConfigError::ProviderImport(format!("{} is required", family.base_url_keys[0]))
+    })?;
+    let default_model = first_json_string(object, family.model_keys);
+    let token_ref = first_json_string(object, family.secret_keys).ok_or_else(|| {
+        ConfigError::ProviderImport(format!(
+            "{} must be an env or secret reference",
+            family.secret_keys[0]
+        ))
+    })?;
+    let (secret_ref, secret_env_key, secret_source) =
+        parse_secret_reference(&token_ref, family.default_secret_env_key)?;
+    let mut runtime_env = BTreeMap::new();
+    for key in [
+        "API_TIMEOUT_MS",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "effortLevel",
+    ] {
+        if let Some(value) = get_json_string(object, key) {
+            runtime_env.insert(key.to_owned(), value);
+        }
+    }
+
+    let provider = ProviderConfig {
+        id: get_json_string(object, "id").unwrap_or_else(|| family.default_id.to_owned()),
+        kind: family.kind.clone(),
+        display_name: get_json_string(object, "name")
+            .unwrap_or_else(|| family.default_display_name.to_owned()),
+        base_url: Some(base_url),
+        api_key_ref: Some(secret_ref.clone()),
+        models: default_model.clone().into_iter().collect(),
+        default_account_id: Some("main".to_owned()),
+        default_model,
+        anthropic_defaults: None,
+        runtime_env,
+        accounts: vec![ProviderAccountConfig {
+            id: "main".to_owned(),
+            display_name: "Main provider token".to_owned(),
+            secret_ref,
+            secret_env_key,
+            secret_source,
+            enabled: true,
+            priority: 10,
+        }],
+        model_runtime: None,
+        served_model_name: None,
+    };
+
+    Ok(ProvidersConfig {
+        providers: vec![provider],
+    })
+}
+
+struct EnvProviderImportFamily {
+    kind: AiProviderKind,
+    default_id: &'static str,
+    default_display_name: &'static str,
+    base_url_keys: &'static [&'static str],
+    model_keys: &'static [&'static str],
+    secret_keys: &'static [&'static str],
+    default_secret_env_key: &'static str,
+}
+
+fn provider_import_family(import_type: &str) -> Result<EnvProviderImportFamily, ConfigError> {
+    match import_type {
+        "openai-compatible" | "openai-relay" => Ok(EnvProviderImportFamily {
+            kind: AiProviderKind::OpenAiCompatible,
+            default_id: "external.openai-compatible",
+            default_display_name: "OpenAI-compatible Provider",
+            base_url_keys: &["LM_BASE_URL", "OPENAI_BASE_URL"],
+            model_keys: &["LM_MODEL", "OPENAI_MODEL"],
+            secret_keys: &["LM_API_KEY", "OPENAI_API_KEY"],
+            default_secret_env_key: "LM_API_KEY",
+        }),
+        "deepseek" => Ok(EnvProviderImportFamily {
+            kind: AiProviderKind::DeepSeek,
+            default_id: "deepseek.api",
+            default_display_name: "DeepSeek API",
+            base_url_keys: &["DEEPSEEK_BASE_URL", "LM_BASE_URL"],
+            model_keys: &["DEEPSEEK_MODEL", "LM_MODEL"],
+            secret_keys: &["DEEPSEEK_API_KEY", "LM_API_KEY"],
+            default_secret_env_key: "DEEPSEEK_API_KEY",
+        }),
+        "codex" => Ok(EnvProviderImportFamily {
+            kind: AiProviderKind::Codex,
+            default_id: "codex.api",
+            default_display_name: "Codex API",
+            base_url_keys: &["CODEX_BASE_URL", "LM_BASE_URL"],
+            model_keys: &["CODEX_MODEL", "LM_MODEL"],
+            secret_keys: &["CODEX_API_KEY", "LM_API_KEY"],
+            default_secret_env_key: "CODEX_API_KEY",
+        }),
+        "lm-studio" => Ok(EnvProviderImportFamily {
+            kind: AiProviderKind::LmStudio,
+            default_id: "local.lm-studio",
+            default_display_name: "LM Studio",
+            base_url_keys: &["LM_STUDIO_BASE_URL", "LM_BASE_URL"],
+            model_keys: &["LM_STUDIO_MODEL", "LM_MODEL"],
+            secret_keys: &["LM_STUDIO_API_KEY", "LM_API_KEY"],
+            default_secret_env_key: "LM_API_KEY",
+        }),
+        _ => Err(ConfigError::ProviderImport(format!(
+            "unsupported provider import type: {import_type}"
+        ))),
+    }
+}
+
+fn first_json_string(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| get_json_string(object, key))
+}
+
 fn get_json_string(object: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
     object
         .get(key)
@@ -158,6 +330,7 @@ fn get_json_string(object: &serde_json::Map<String, Value>, key: &str) -> Option
 
 fn parse_secret_reference(
     value: &str,
+    default_secret_env_key: &str,
 ) -> Result<(String, String, ProviderSecretSource), ConfigError> {
     let trimmed = value.trim();
     let env_key = trimmed
@@ -180,7 +353,7 @@ fn parse_secret_reference(
         }
         return Ok((
             secret_ref.to_owned(),
-            "ANTHROPIC_AUTH_TOKEN".to_owned(),
+            default_secret_env_key.to_owned(),
             ProviderSecretSource::SecretRef,
         ));
     }

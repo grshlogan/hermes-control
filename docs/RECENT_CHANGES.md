@@ -4,6 +4,21 @@ This document records landed structural changes after each working
 conversation. Keep entries short, factual, and ordered by time. Do not record
 unimplemented ideas here.
 
+## 2026-05-30: Harden native provider JSON import previews
+
+- Extended native `{"providers":[...]}` JSON imports to normalize provider
+  account secret references before previewing them.
+- Kept account-pool imports reusable by accepting `env:...` and
+  `secret_ref:...` references while rejecting raw token-looking `secret_ref`
+  values.
+- Extended env-style provider JSON imports beyond Claude relays to
+  OpenAI-compatible, DeepSeek, Codex, and LM Studio families with provider
+  account bindings.
+- Added a WSL helper sandbox test for OpenAI-compatible route apply so account
+  env keys are copied to `LM_API_KEY` without printing the token.
+- Added daemon preview coverage so raw account secrets in native provider JSON
+  return `400 Bad Request` instead of reaching the GUI preview payload.
+
 ## 2026-05-30: Add provider JSON import preview through daemon and GUI
 
 - Added daemon `/v1/providers/import/preview` as a dry-run-only endpoint backed
