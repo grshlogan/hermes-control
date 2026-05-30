@@ -18,14 +18,15 @@ use axum::{
 };
 use hermes_control_core::{
     ConfigError, ConfigSet, HermesRuntimeController, ModelRuntimeController, OpenWebUiController,
-    OperationPlan, WslController, collect_read_only_status, load_config_dir, tail_file_lines,
+    OperationPlan, WslController, collect_read_only_status, import_provider_json, load_config_dir,
+    tail_file_lines,
 };
 use hermes_control_types::{
     ActionRequest, ActiveRouteStatus, AiProviderKind, AuditEventSummary, CancelRequest,
     CommandPreview, ConfirmRequest, ConfirmationLifecycleResponse, HealthStatus, HermesAction,
     ModelAction, ModelRuntimeSummary, OpenWebUiAction, OperationResponse, ProviderConfig,
-    ReadOnlyStatus, Requester, RequesterChannel, RiskLevel, RouteRollbackRequest,
-    RouteSwitchRequest, WslAction,
+    ProviderImportPreviewRequest, ProviderImportPreviewResponse, ReadOnlyStatus, Requester,
+    RequesterChannel, RiskLevel, RouteRollbackRequest, RouteSwitchRequest, WslAction,
 };
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
@@ -252,6 +253,10 @@ pub fn build_router_with_executor(
         .route("/v1/status", get(status))
         .route("/v1/health", get(health))
         .route("/v1/providers", get(providers))
+        .route(
+            "/v1/providers/import/preview",
+            post(provider_import_preview),
+        )
         .route("/v1/models", get(models))
         .route("/v1/models/{model_id}", get(model_status))
         .route("/v1/models/{model_id}/action", post(model_action))
@@ -317,6 +322,32 @@ async fn providers(
             tracing::warn!(error = %err, "failed to load providers");
             StatusCode::INTERNAL_SERVER_ERROR
         })
+}
+
+async fn provider_import_preview(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ProviderImportPreviewRequest>,
+) -> ApiResult<ProviderImportPreviewResponse> {
+    require_auth(&state, &headers)?;
+    if !request.dry_run || request.source != "json" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let imported = import_provider_json(&request.payload).map_err(|err| {
+        tracing::warn!(error = %err, "failed to preview provider import");
+        StatusCode::BAD_REQUEST
+    })?;
+    let provider_count = imported.providers.len();
+
+    Ok(Json(ProviderImportPreviewResponse {
+        status: "dry_run".to_owned(),
+        source: request.source,
+        dry_run: true,
+        summary: format!("Previewed {provider_count} provider import draft(s)."),
+        provider_count,
+        providers: imported.providers,
+    }))
 }
 
 async fn models(

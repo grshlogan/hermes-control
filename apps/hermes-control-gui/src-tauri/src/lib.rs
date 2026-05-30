@@ -169,6 +169,16 @@ async fn gui_openwebui_action_execute(action: OpenWebUiAction) -> Result<Operati
 }
 
 #[tauri::command]
+async fn gui_provider_import_preview(payload: String) -> Result<hermes_control_types::ProviderImportPreviewResponse, String> {
+    let config = GuiConfig::from_env().map_err(|err| err.to_string())?;
+    let client = GuiDaemonClient::from_config(&config);
+    client
+        .provider_import_preview(payload, config.operator_id())
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 async fn gui_log_tail(target: GuiLogTarget, tail: usize) -> Result<GuiLogTail, String> {
     let config = GuiConfig::from_env().map_err(|err| err.to_string())?;
     let client = GuiDaemonClient::from_config(&config);
@@ -198,6 +208,7 @@ pub fn run() {
             gui_hermes_action_execute,
             gui_openwebui_action_preview,
             gui_openwebui_action_execute,
+            gui_provider_import_preview,
             gui_log_tail
         ])
         .run(tauri::generate_context!())

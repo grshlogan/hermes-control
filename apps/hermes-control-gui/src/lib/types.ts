@@ -120,6 +120,21 @@ export interface GuiDashboardSnapshot {
   audit: AuditEventSummary[];
 }
 
+export interface ProviderImportPreviewResponse {
+  status: string;
+  source: string;
+  dry_run: boolean;
+  summary: string;
+  provider_count: number;
+  providers: ProviderConfig[];
+}
+
+export interface ProviderImportPreviewRowViewModel {
+  id: string;
+  label: string;
+  summary: string;
+}
+
 export interface DashboardViewModel {
   overallLabel: string;
   activeRoute: string;

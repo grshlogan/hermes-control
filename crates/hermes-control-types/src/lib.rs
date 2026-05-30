@@ -106,6 +106,24 @@ pub struct RouteRollbackRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderImportPreviewRequest {
+    pub requester: Requester,
+    pub source: String,
+    pub payload: String,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderImportPreviewResponse {
+    pub status: String,
+    pub source: String,
+    pub dry_run: bool,
+    pub summary: String,
+    pub provider_count: usize,
+    pub providers: Vec<ProviderConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfirmRequest {
     pub requester: Requester,
     pub code: String,

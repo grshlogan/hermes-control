@@ -3,8 +3,9 @@ use std::collections::BTreeMap;
 use hermes_control_types::{
     ActionRequest, ActiveRouteStatus, AuditEventSummary, CancelRequest, ConfirmRequest,
     ConfirmationLifecycleResponse, HealthStatus, HermesAction, ModelAction, ModelRuntimeSummary,
-    OpenWebUiAction, OperationResponse, ProviderConfig, ReadOnlyStatus, Requester,
-    RequesterChannel, RouteRollbackRequest, RouteSwitchRequest, WslAction,
+    OpenWebUiAction, OperationResponse, ProviderConfig, ProviderImportPreviewRequest,
+    ProviderImportPreviewResponse, ReadOnlyStatus, Requester, RequesterChannel,
+    RouteRollbackRequest, RouteSwitchRequest, WslAction,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
@@ -174,6 +175,7 @@ pub enum GuiDaemonCommand {
     HermesActionExecute,
     OpenWebUiActionPreview,
     OpenWebUiActionExecute,
+    ProviderImportPreview,
     LogsTail,
 }
 
@@ -195,6 +197,7 @@ impl GuiDaemonCommand {
             Self::HermesActionExecute,
             Self::OpenWebUiActionPreview,
             Self::OpenWebUiActionExecute,
+            Self::ProviderImportPreview,
             Self::LogsTail,
         ]
     }
@@ -216,6 +219,7 @@ impl GuiDaemonCommand {
             Self::HermesActionExecute => "hermes_action_execute",
             Self::OpenWebUiActionPreview => "openwebui_action_preview",
             Self::OpenWebUiActionExecute => "openwebui_action_execute",
+            Self::ProviderImportPreview => "provider_import_preview",
             Self::LogsTail => "logs_tail",
         }
     }
@@ -268,6 +272,18 @@ pub fn route_rollback_request(
         requester: gui_requester(operator_id),
         reason: "GUI route rollback".to_owned(),
         dry_run,
+    }
+}
+
+pub fn provider_import_preview_request(
+    payload: impl Into<String>,
+    operator_id: impl Into<String>,
+) -> ProviderImportPreviewRequest {
+    ProviderImportPreviewRequest {
+        requester: gui_requester(operator_id),
+        source: "json".to_owned(),
+        payload: payload.into(),
+        dry_run: true,
     }
 }
 
@@ -616,6 +632,18 @@ impl GuiDaemonClient {
         self.post_json(
             "/v1/openwebui/action",
             &openwebui_action_request(action, operator_id, false),
+        )
+        .await
+    }
+
+    pub async fn provider_import_preview(
+        &self,
+        payload: impl Into<String>,
+        operator_id: impl Into<String>,
+    ) -> Result<ProviderImportPreviewResponse, GuiError> {
+        self.post_json(
+            "/v1/providers/import/preview",
+            &provider_import_preview_request(payload, operator_id),
         )
         .await
     }

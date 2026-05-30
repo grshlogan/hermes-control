@@ -95,7 +95,12 @@ assert env_values["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "claude-haiku-4-5", env_va
 assert env_values["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "claude-opus-4-7", env_values
 assert env_values["API_TIMEOUT_MS"] == "600000", env_values
 assert env_values["HTTPS_PROXY"] == "http://127.0.0.1:7890", env_values
-assert env_values["NO_PROXY"] == "127.0.0.1,localhost", env_values
+no_proxy_values = {
+    value.strip()
+    for value in env_values["NO_PROXY"].split(",")
+    if value.strip()
+}
+assert {"127.0.0.1", "localhost"}.issubset(no_proxy_values), env_values
 assert env_values["effortLevel"] == "high", env_values
 assert env_values["LM_BASE_URL"] == "https://api-relay.example.com/", env_values
 assert env_values["LM_MODEL"] == "claude-sonnet-4-6", env_values

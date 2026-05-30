@@ -381,6 +381,38 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.import-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(27, 33, 31, 0.12);
+}
+
+.import-panel label {
+  display: grid;
+  gap: 6px;
+}
+
+.import-panel label span {
+  color: #66736d;
+  font-size: 13px;
+}
+
+.import-panel textarea {
+  width: 100%;
+  min-height: 156px;
+  resize: vertical;
+  padding: 12px;
+  color: #1b211f;
+  border: 1px solid rgba(27, 33, 31, 0.16);
+  border-radius: 6px;
+  background: #fffdf8;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .model-list,
 .audit-list {
   display: grid;

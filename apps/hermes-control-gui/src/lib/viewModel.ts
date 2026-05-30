@@ -11,6 +11,8 @@ import type {
   ModelActionProgressViewModel,
   OpenWebUiActionId,
   OperationResponse,
+  ProviderConfig,
+  ProviderImportPreviewRowViewModel,
   RouteOptionViewModel,
   RuntimeActionOptionViewModel,
   SettingsViewModel,
@@ -76,6 +78,37 @@ export function buildRouteOptions(snapshot: GuiDashboardSnapshot): RouteOptionVi
       runtimeEnvKeys,
       isActive: provider.id === snapshot.active_route.active_profile_id,
       isLastKnownGood: provider.id === snapshot.active_route.last_known_good_profile_id,
+    };
+  });
+}
+
+export function buildProviderImportPreviewRows(
+  providers: ProviderConfig[],
+): ProviderImportPreviewRowViewModel[] {
+  return providers.map((provider) => {
+    const defaultAccount =
+      provider.accounts?.find((account) => account.id === provider.default_account_id) ??
+      provider.accounts?.find((account) => account.enabled);
+    const runtimeEnvKeys = Object.keys(provider.runtime_env ?? {}).sort();
+    const defaultModel =
+      provider.default_model ??
+      provider.anthropic_defaults?.model ??
+      provider.anthropic_defaults?.sonnet ??
+      provider.served_model_name ??
+      provider.models[0] ??
+      'not set';
+    const values = [
+      provider.kind,
+      provider.base_url ?? 'local',
+      defaultModel,
+      defaultAccount ? `${defaultAccount.id} / env:${defaultAccount.secret_env_key}` : 'no secret required',
+      runtimeEnvKeys.length ? `env keys: ${runtimeEnvKeys.join(', ')}` : '',
+    ].filter(Boolean);
+
+    return {
+      id: provider.id,
+      label: provider.display_name,
+      summary: values.join(' / '),
     };
   });
 }

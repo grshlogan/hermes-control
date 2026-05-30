@@ -10,6 +10,7 @@ import {
   buildModelActionProgressMessage,
   buildModelActionOptions,
   buildOpenWebUiActionOptions,
+  buildProviderImportPreviewRows,
   buildRouteOptions,
   buildSettingsViewModel,
   buildStateStoreSummary,
@@ -186,6 +187,53 @@ describe('Phase8 GUI view model', () => {
         isLastKnownGood: true,
       },
     ]);
+  });
+
+  it('summarizes provider import previews without exposing secret references', () => {
+    const rows = buildProviderImportPreviewRows([
+      {
+        id: 'external.api-relay',
+        kind: 'AnthropicClaude',
+        display_name: 'API Relay',
+        base_url: 'https://api-relay.example.com/',
+        api_key_ref: 'env:ANTHROPIC_AUTH_TOKEN',
+        models: ['claude-sonnet-4-6'],
+        default_account_id: 'main',
+        default_model: 'claude-sonnet-4-6',
+        anthropic_defaults: {
+          model: 'claude-sonnet-4-6',
+          sonnet: 'claude-sonnet-4-6',
+          haiku: 'claude-haiku-4-5',
+          opus: 'claude-opus-4-7',
+        },
+        runtime_env: {
+          API_TIMEOUT_MS: '600000',
+          effortLevel: 'high',
+        },
+        accounts: [
+          {
+            id: 'main',
+            display_name: 'Main relay token',
+            secret_ref: 'env:ANTHROPIC_AUTH_TOKEN',
+            secret_env_key: 'ANTHROPIC_AUTH_TOKEN',
+            secret_source: 'env',
+            enabled: true,
+            priority: 10,
+          },
+        ],
+      },
+    ]);
+
+    expect(rows).toEqual([
+      {
+        id: 'external.api-relay',
+        label: 'API Relay',
+        summary:
+          'AnthropicClaude / https://api-relay.example.com/ / claude-sonnet-4-6 / main / env:ANTHROPIC_AUTH_TOKEN / env keys: API_TIMEOUT_MS, effortLevel',
+      },
+    ]);
+    expect(JSON.stringify(rows)).not.toContain('secret_ref');
+    expect(JSON.stringify(rows)).not.toContain('env:ANTHROPIC_AUTH_TOKEN","secret_env_key');
   });
 
   it('keeps log target selection bounded to daemon-owned safe targets', () => {

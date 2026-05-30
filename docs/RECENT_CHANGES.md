@@ -4,6 +4,16 @@ This document records landed structural changes after each working
 conversation. Keep entries short, factual, and ordered by time. Do not record
 unimplemented ideas here.
 
+## 2026-05-30: Add provider JSON import preview through daemon and GUI
+
+- Added daemon `/v1/providers/import/preview` as a dry-run-only endpoint backed
+  by the existing Claude/Anthropic relay JSON normalizer.
+- Added GUI/Tauri client wiring and an AI Route page textarea so operators can
+  preview provider/account JSON drafts without writing config.
+- Kept the import preview non-sensitive: the UI displays provider type, base
+  URL, default model, secret env key, and runtime env key names, not raw keys or
+  stored secret refs.
+
 ## 2026-05-30: Add provider account bindings and Claude relay import schema
 
 - Extended provider config with account bindings, default account/model fields,

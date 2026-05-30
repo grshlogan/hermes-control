@@ -31,6 +31,7 @@ import {
   loadLogTail,
   previewRouteRollback,
   previewRouteSwitch,
+  previewProviderImport,
   executeModelAction,
   executeHermesAction,
   executeOpenWebUiAction,
@@ -52,6 +53,7 @@ import type {
   ModelActionId,
   OpenWebUiActionId,
   OperationResponse,
+  ProviderImportPreviewResponse,
   WslActionId,
 } from './lib/types';
 import {
@@ -65,6 +67,7 @@ import {
   buildModelActionProgressMessage,
   buildModelActionOptions,
   buildOpenWebUiActionOptions,
+  buildProviderImportPreviewRows,
   buildRouteOptions,
   buildSettingsViewModel,
   buildStateStoreSummary,
@@ -117,6 +120,9 @@ export default function App() {
   const [routePreview, setRoutePreview] = useState<OperationResponse | null>(null);
   const [routeMessage, setRouteMessage] = useState(() => t('route.initial'));
   const [routeBusy, setRouteBusy] = useState(false);
+  const [providerImportJson, setProviderImportJson] = useState('');
+  const [providerImportPreview, setProviderImportPreview] =
+    useState<ProviderImportPreviewResponse | null>(null);
   const [confirmationCode, setConfirmationCode] = useState('');
   const [selectedModelId, setSelectedModelId] = useState('');
   const [selectedModelAction, setSelectedModelAction] = useState<ModelActionId>('Health');
@@ -263,6 +269,27 @@ export default function App() {
       await refresh();
     } catch (error) {
       setRouteMessage(formatRequestError(error, t('route.rollbackFailed'), t('route.conflict')));
+    } finally {
+      setRouteBusy(false);
+    }
+  }
+
+  async function previewProviderImportJson() {
+    if (!providerImportJson.trim()) {
+      setRouteMessage(t('route.importEmpty'));
+      setProviderImportPreview(null);
+      return;
+    }
+
+    setRouteBusy(true);
+    setRouteMessage(t('route.importPreviewing'));
+    try {
+      const preview = await previewProviderImport(providerImportJson);
+      setProviderImportPreview(preview);
+      setRouteMessage(preview.summary || t('route.importPreviewLoaded'));
+    } catch (error) {
+      setProviderImportPreview(null);
+      setRouteMessage(error instanceof Error ? error.message : t('route.importPreviewFailed'));
     } finally {
       setRouteBusy(false);
     }
@@ -638,6 +665,10 @@ export default function App() {
                 routePreview={routePreview}
                 routeMessage={routeMessage}
                 routeBusy={routeBusy}
+                providerImportJson={providerImportJson}
+                setProviderImportJson={setProviderImportJson}
+                providerImportPreview={providerImportPreview}
+                previewProviderImportJson={previewProviderImportJson}
                 confirmationPrompt={confirmationPrompt}
                 confirmationCode={confirmationCode}
                 setConfirmationCode={setConfirmationCode}
@@ -833,6 +864,10 @@ function RoutePane({
   routePreview,
   routeMessage,
   routeBusy,
+  providerImportJson,
+  setProviderImportJson,
+  providerImportPreview,
+  previewProviderImportJson,
   confirmationPrompt,
   confirmationCode,
   setConfirmationCode,
@@ -850,6 +885,10 @@ function RoutePane({
   routePreview: OperationResponse | null;
   routeMessage: string;
   routeBusy: boolean;
+  providerImportJson: string;
+  setProviderImportJson: (value: string) => void;
+  providerImportPreview: ProviderImportPreviewResponse | null;
+  previewProviderImportJson: () => void;
   confirmationPrompt: ReturnType<typeof buildConfirmationPrompt>;
   confirmationCode: string;
   setConfirmationCode: (value: string) => void;
@@ -916,6 +955,42 @@ function RoutePane({
           />
         ))}
       </div>
+      <section className="import-panel" aria-label={t('route.importJson')}>
+        <PanelHeader title={t('route.importJson')} note={t('route.importNote')} />
+        <label>
+          <span>{t('route.importJson')}</span>
+          <textarea
+            value={providerImportJson}
+            onChange={(event) => setProviderImportJson(event.target.value)}
+            placeholder={t('route.importPlaceholder')}
+            spellCheck={false}
+          />
+        </label>
+        <div className="button-group">
+          <button
+            type="button"
+            onClick={previewProviderImportJson}
+            disabled={routeBusy}
+            title={t('route.importPreview')}
+          >
+            <Search size={16} />
+            <span>{t('route.importPreview')}</span>
+          </button>
+        </div>
+        {providerImportPreview && (
+          <section className="operation-preview" aria-label={t('route.importPreviewLoaded')}>
+            <PanelHeader title={t('route.importPreviewLoaded')} note={providerImportPreview.summary} />
+            <div className="detail-table">
+              <Row label={t('operation.status')} value={providerImportPreview.status} />
+              <Row label={t('operation.dryRun')} value={String(providerImportPreview.dry_run)} />
+              <Row label={t('route.importProviderCount')} value={String(providerImportPreview.provider_count)} />
+              {buildProviderImportPreviewRows(providerImportPreview.providers).map((provider) => (
+                <Row key={provider.id} label={`${provider.id} / ${provider.label}`} value={provider.summary} />
+              ))}
+            </div>
+          </section>
+        )}
+      </section>
       {routePreview && <OperationPreview response={routePreview} t={t} />}
       {confirmationPrompt && (
         <ConfirmationSheet

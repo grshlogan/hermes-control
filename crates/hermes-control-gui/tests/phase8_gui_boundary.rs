@@ -4,11 +4,13 @@ use hermes_control_gui::{
     GuiConfig, GuiDaemonCommand, GuiLogTarget, gui_boundary, gui_connection_summary_from_env_iter,
     gui_tauri_capability, hermes_action_request, log_tail_path, model_action_request,
     openwebui_action_request, operation_cancel_request, operation_confirm_request,
-    route_rollback_request, route_switch_request, wsl_action_request,
+    provider_import_preview_request, route_rollback_request, route_switch_request,
+    wsl_action_request,
 };
 use hermes_control_types::{
     ActionRequest, CancelRequest, ConfirmRequest, HermesAction, ModelAction, OpenWebUiAction,
-    RequesterChannel, RouteRollbackRequest, RouteSwitchRequest, WslAction,
+    ProviderImportPreviewRequest, RequesterChannel, RouteRollbackRequest, RouteSwitchRequest,
+    WslAction,
 };
 
 #[test]
@@ -107,6 +109,30 @@ fn route_switch_execute_request_uses_gui_requester_without_dry_run() {
     assert_eq!(request.profile_id, "external.deepseek");
     assert_eq!(request.reason, "GUI route switch external.deepseek");
     assert!(!request.dry_run);
+}
+
+#[test]
+fn provider_import_preview_request_uses_gui_requester_and_dry_run() {
+    let request = provider_import_preview_request(
+        r#"{"type":"claude-relay","ANTHROPIC_AUTH_TOKEN":"$env:ANTHROPIC_AUTH_TOKEN"}"#,
+        "desktop-operator",
+    );
+
+    assert_eq!(
+        request,
+        ProviderImportPreviewRequest {
+            requester: hermes_control_types::Requester {
+                channel: RequesterChannel::Gui,
+                user_id: "desktop-operator".to_owned(),
+                chat_id: None,
+            },
+            source: "json".to_owned(),
+            payload:
+                r#"{"type":"claude-relay","ANTHROPIC_AUTH_TOKEN":"$env:ANTHROPIC_AUTH_TOKEN"}"#
+                    .to_owned(),
+            dry_run: true,
+        }
+    );
 }
 
 #[test]
@@ -243,6 +269,7 @@ fn gui_daemon_commands_do_not_include_raw_process_or_filesystem_access() {
     assert!(commands.contains(&GuiDaemonCommand::HermesActionExecute));
     assert!(commands.contains(&GuiDaemonCommand::OpenWebUiActionPreview));
     assert!(commands.contains(&GuiDaemonCommand::OpenWebUiActionExecute));
+    assert!(commands.contains(&GuiDaemonCommand::ProviderImportPreview));
     assert!(commands.contains(&GuiDaemonCommand::LogsTail));
 
     for command in commands {

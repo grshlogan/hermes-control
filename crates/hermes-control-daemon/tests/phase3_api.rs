@@ -17,7 +17,7 @@ use axum::{
 };
 use hermes_control_daemon::build_router;
 use rusqlite::Connection;
-use serde_json::Value;
+use serde_json::{Value, json};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
@@ -119,6 +119,42 @@ async fn phase3_router_serves_read_only_config_state_and_model_routes() {
 }
 
 #[tokio::test]
+async fn phase3_router_previews_provider_json_import_without_raw_secret_storage() {
+    let fixture = Fixture::new();
+    let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
+
+    let response = post_json(
+        router,
+        "/v1/providers/import/preview",
+        json!({
+            "requester": {"channel": "gui", "user_id": "desktop-operator"},
+            "source": "json",
+            "payload": r#"{
+              "type": "claude-relay",
+              "id": "external.api-relay",
+              "name": "API Relay",
+              "ANTHROPIC_BASE_URL": "https://api-relay.example.com/",
+              "ANTHROPIC_AUTH_TOKEN": "$env:ANTHROPIC_AUTH_TOKEN",
+              "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+              "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5",
+              "API_TIMEOUT_MS": "600000"
+            }"#,
+            "dry_run": true
+        }),
+    )
+    .await;
+
+    assert_eq!(response["status"], "dry_run");
+    assert_eq!(response["provider_count"], 1);
+    assert_eq!(response["providers"][0]["id"], "external.api-relay");
+    assert_eq!(
+        response["providers"][0]["accounts"][0]["secret_env_key"],
+        "ANTHROPIC_AUTH_TOKEN"
+    );
+    assert!(!response.to_string().contains("sk-"));
+}
+
+#[tokio::test]
 async fn phase3_router_health_is_fast_daemon_liveness_probe() {
     let fixture = Fixture::new();
     let router = build_router(&fixture.config_dir, TOKEN).expect("router should build");
@@ -174,6 +210,26 @@ async fn get(router: Router, path: &str, token: Option<&str>) -> axum::response:
 
 async fn get_json(router: Router, path: &str) -> Value {
     let response = get(router, path, Some(TOKEN)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should collect");
+    serde_json::from_slice(&bytes).expect("response should be JSON")
+}
+
+async fn post_json(router: Router, path: &str, body: Value) -> Value {
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(path)
+                .header(AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should complete");
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = to_bytes(response.into_body(), usize::MAX)
         .await

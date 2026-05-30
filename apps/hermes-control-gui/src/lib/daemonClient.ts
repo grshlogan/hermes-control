@@ -10,6 +10,7 @@ import type {
   ModelActionId,
   OpenWebUiActionId,
   OperationResponse,
+  ProviderImportPreviewResponse,
   WslActionId,
 } from './types';
 
@@ -259,6 +260,20 @@ export async function executeOpenWebUiAction(action: OpenWebUiActionId): Promise
     reason: `GUI Open WebUI ${runtimeActionReason(action)}`,
     dry_run: false,
   }) as Promise<OperationResponse>;
+}
+
+export async function previewProviderImport(payload: string): Promise<ProviderImportPreviewResponse> {
+  if (isTauriRuntime()) {
+    return invoke<ProviderImportPreviewResponse>('gui_provider_import_preview', { payload });
+  }
+
+  const settings = readBrowserSettings();
+  return postJson(settings, '/v1/providers/import/preview', {
+    requester: guiRequester(settings.operatorId),
+    source: 'json',
+    payload,
+    dry_run: true,
+  }) as Promise<ProviderImportPreviewResponse>;
 }
 
 export async function loadLogTail(
